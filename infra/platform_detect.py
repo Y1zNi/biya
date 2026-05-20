@@ -1,0 +1,47 @@
+"""根据 URL 识别发帖平台."""
+
+from __future__ import annotations
+
+import re
+from typing import Tuple
+
+from core.models import PlatformDetectResult
+from core.platforms import can_collect
+
+PLATFORM_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
+  ('douyin', '抖音', ('douyin.com', 'iesdouyin.com', 'v.douyin.com')),
+  ('kuaishou', '快手', ('kuaishou.com',)),
+  ('xiaohongshu', '小红书', ('xiaohongshu.com', 'xhslink.com')),
+  ('bilibili', 'B站', ('bilibili.com', 'b23.tv')),
+  ('weibo', '微博', ('weibo.com', 'weibo.cn')),
+  ('vivo', 'vivo社区', ('bbs.vivo.com.cn',)),
+)
+
+
+def detect_platform(url: str) -> PlatformDetectResult:
+  text = (url or '').strip().lower()
+  if not text:
+    return PlatformDetectResult('unknown', '未知', False)
+
+  if not text.startswith(('http://', 'https://')):
+    text = f'https://{text}'
+
+  for platform_id, platform_name, hosts in PLATFORM_RULES:
+    for host in hosts:
+      if host in text:
+        return PlatformDetectResult(platform_id, platform_name, can_collect(platform_id))
+
+  return PlatformDetectResult('unknown', '未知', False)
+
+
+def is_douyin_url(url: str) -> bool:
+  return detect_platform(url).platform_id == 'douyin'
+
+
+def guess_link_column_index(headers: list[str]) -> int:
+  patterns = re.compile(r'链接|link|url|地址|视频|作品', re.I)
+  for index, header in enumerate(headers):
+    name = str(header or '').strip()
+    if patterns.search(name):
+      return index
+  return -1

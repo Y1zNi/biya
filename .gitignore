@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+debug_*.png
+.venv/
+venv/
+build/
+dist/
+release/
+_bundle/
+*.spec.bak
+Thumbs.db
+Desktop.ini
