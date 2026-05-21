@@ -7,7 +7,7 @@ from typing import Optional
 
 from playwright.async_api import BrowserContext, Page
 
-from config import COLLECT_PAGE_TIMEOUT, COLLECT_REQUEST_INTERVAL
+from infra.collect.runtime_config import get_batch_page_timeout_ms
 from core.models import CollectResultItem, CollectRowStatus
 from infra.collectors.douyin_parsers import number_format
 from infra.collectors.kuaishou_parsers import api_client
@@ -225,7 +225,7 @@ async def collect_one_on_page(
     await page.goto(
       collect_url,
       wait_until='domcontentloaded',
-      timeout=COLLECT_PAGE_TIMEOUT,
+      timeout=get_batch_page_timeout_ms(),
     )
     await wait_for_detail_surface(page)
     await kuaishou_page.dismiss_overlays(page)
@@ -298,4 +298,3 @@ async def collect_one(
     return await collect_one_on_page(page, link)
   finally:
     await page.close()
-    await asyncio.sleep(COLLECT_REQUEST_INTERVAL)

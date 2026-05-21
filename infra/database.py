@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Generator, List, Optional, Tuple
+from typing import Dict, Generator, Iterable, List, Optional, Tuple
 
 from config import DB_FILE, PLATFORMS, ensure_dirs
 
@@ -299,11 +299,28 @@ class Database:
     return result
 
   def get_collectable_accounts_grouped(self) -> Dict[str, List[Account]]:
-    """返回各平台可采集账号列表，供采集页渲染下拉."""
+    """返回各平台可采集账号列表."""
     grouped: Dict[str, List[Account]] = {}
     for platform in PLATFORMS:
       grouped[platform['id']] = self.get_collectable_accounts(platform['id'])
     return grouped
+
+  def get_latest_collectable_account(self, platform: str) -> Optional[Account]:
+    """取该平台最新可采集账号（id 最大且 state 文件存在）."""
+    accounts = self.get_collectable_accounts(platform)
+    return accounts[0] if accounts else None
+
+  def get_latest_collectable_account_map(
+    self,
+    platform_ids: Iterable[str],
+  ) -> Dict[str, Account]:
+    """为各平台解析最新可采集账号."""
+    result: Dict[str, Account] = {}
+    for platform_id in platform_ids:
+      account = self.get_latest_collectable_account(platform_id)
+      if account is not None:
+        result[platform_id] = account
+    return result
 
   def create_collect_task(
     self,

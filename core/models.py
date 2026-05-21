@@ -63,6 +63,40 @@ class CollectProgress:
 
 
 @dataclass
+class CollectParams:
+  min_delay_sec: float = 2.0
+  max_delay_sec: float = 2.0
+  retry_count: int = 1
+  page_timeout_sec: int = 60
+  start_row: int = 1
+  end_row: int = 0
+
+  @property
+  def page_timeout_ms(self) -> int:
+    return max(1, self.page_timeout_sec) * 1000
+
+  @classmethod
+  def defaults(cls) -> 'CollectParams':
+    from config import (
+      COLLECT_DEFAULT_END_ROW,
+      COLLECT_DEFAULT_MAX_DELAY_SEC,
+      COLLECT_DEFAULT_MIN_DELAY_SEC,
+      COLLECT_DEFAULT_PAGE_TIMEOUT_SEC,
+      COLLECT_DEFAULT_RETRY_COUNT,
+      COLLECT_DEFAULT_START_ROW,
+    )
+
+    return cls(
+      min_delay_sec=COLLECT_DEFAULT_MIN_DELAY_SEC,
+      max_delay_sec=COLLECT_DEFAULT_MAX_DELAY_SEC,
+      retry_count=COLLECT_DEFAULT_RETRY_COUNT,
+      page_timeout_sec=COLLECT_DEFAULT_PAGE_TIMEOUT_SEC,
+      start_row=COLLECT_DEFAULT_START_ROW,
+      end_row=COLLECT_DEFAULT_END_ROW,
+    )
+
+
+@dataclass
 class CollectSummary:
   total: int = 0
   success_count: int = 0

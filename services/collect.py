@@ -3,17 +3,27 @@
 from __future__ import annotations
 
 import asyncio
+import random
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
 from playwright.async_api import Browser, BrowserContext, async_playwright
 
-from core.models import CollectProgress, CollectResultItem, CollectRowStatus, CollectSummary
+from core.models import (
+  CollectParams,
+  CollectProgress,
+  CollectResultItem,
+  CollectRowStatus,
+  CollectSummary,
+)
 from core.platforms import can_collect
 from infra.browser import get_or_create_collect_context
+from infra.collect.runtime_config import (
+  reset_batch_page_timeout_ms,
+  set_batch_page_timeout_ms,
+)
 from infra.collectors.registry import get_collector
 from infra.database import Account, Database
-from config import COLLECT_REQUEST_INTERVAL
 from infra.platform_detect import detect_platform
 
 OnProgress = Callable[[CollectProgress], None]
@@ -51,8 +61,20 @@ def build_no_account_item(link: str, platform_name: str, platform_id: str = '') 
     shares='-',
     media_type='-',
     status=CollectRowStatus.FAILED,
-    error_msg='未配置该平台执行账号',
+    error_msg='该平台暂无可用账号，请到账号管理添加并登录',
   )
+
+
+def _should_retry_item(item: CollectResultItem) -> bool:
+  return item.status == CollectRowStatus.FAILED
+
+
+async def _sleep_random_interval(params: CollectParams) -> None:
+  low = min(params.min_delay_sec, params.max_delay_sec)
+  high = max(params.min_delay_sec, params.max_delay_sec)
+  if high <= 0:
+    return
+  await asyncio.sleep(random.uniform(low, high))
 
 
 class CollectService:
@@ -73,6 +95,7 @@ class CollectService:
     links: List[str],
     account_by_platform: Dict[str, Account],
     source_file: str,
+    params: CollectParams,
     *,
     on_progress: Optional[OnProgress] = None,
     on_row: Optional[OnRow] = None,
@@ -101,6 +124,7 @@ class CollectService:
     summary.task_id = task_id
 
     context_cache: Dict[str, Tuple[Browser, BrowserContext]] = {}
+    set_batch_page_timeout_ms(params.page_timeout_ms)
 
     async with async_playwright() as playwright:
       try:
@@ -116,6 +140,7 @@ class CollectService:
             item = build_unsupported_item(link)
             summary.unsupported_count += 1
             self._emit_row(task_id, item, on_row)
+            await _sleep_random_interval(params)
             continue
 
           account = account_by_platform.get(platform.platform_id)
@@ -123,6 +148,7 @@ class CollectService:
             item = build_no_account_item(link, platform.platform_name, platform.platform_id)
             summary.failed_count += 1
             self._emit_row(task_id, item, on_row)
+            await _sleep_random_interval(params)
             continue
 
           collect_fn = get_collector(platform.platform_id)
@@ -143,6 +169,7 @@ class CollectService:
             )
             summary.failed_count += 1
             self._emit_row(task_id, item, on_row)
+            await _sleep_random_interval(params)
             continue
 
           context = await get_or_create_collect_context(
@@ -150,19 +177,16 @@ class CollectService:
             platform.platform_id,
             account,
             context_cache,
+            navigation_timeout_ms=params.page_timeout_ms,
           )
 
-          if platform.platform_id == 'douyin':
-            from infra.collectors.douyin import collect_one as douyin_collect_one
-
-            item = await douyin_collect_one(context, link)
-          else:
-            page = await context.new_page()
-            try:
-              item = await collect_fn(page, link)
-            finally:
-              await page.close()
-              await asyncio.sleep(COLLECT_REQUEST_INTERVAL)
+          item = await self._collect_with_retry(
+            link=link,
+            platform_id=platform.platform_id,
+            context=context,
+            collect_fn=collect_fn,
+            params=params,
+          )
 
           if item.status == CollectRowStatus.SUCCESS:
             summary.success_count += 1
@@ -179,6 +203,7 @@ class CollectService:
             summary.unsupported_count += 1
 
           self._emit_row(task_id, item, on_row)
+          await _sleep_random_interval(params)
       finally:
         from infra.collectors.douyin import close_all_session_pages
 
@@ -186,6 +211,7 @@ class CollectService:
         for browser, context in context_cache.values():
           await context.close()
           await browser.close()
+        reset_batch_page_timeout_ms()
 
     task_status = 'cancelled' if summary.cancelled else 'completed'
     if summary.login_expired:
@@ -209,6 +235,52 @@ class CollectService:
     )
 
     return summary
+
+  async def _collect_with_retry(
+    self,
+    *,
+    link: str,
+    platform_id: str,
+    context: BrowserContext,
+    collect_fn,
+    params: CollectParams,
+  ) -> CollectResultItem:
+    max_attempts = 1 + max(0, params.retry_count)
+    item: CollectResultItem = CollectResultItem(link=link, status=CollectRowStatus.FAILED)
+
+    for attempt in range(max_attempts):
+      if self._cancelled:
+        break
+      item = await self._collect_once(
+        link=link,
+        platform_id=platform_id,
+        context=context,
+        collect_fn=collect_fn,
+      )
+      if not _should_retry_item(item) or attempt >= max_attempts - 1:
+        break
+      await _sleep_random_interval(params)
+
+    return item
+
+  async def _collect_once(
+    self,
+    *,
+    link: str,
+    platform_id: str,
+    context: BrowserContext,
+    collect_fn,
+  ) -> CollectResultItem:
+    if platform_id == 'douyin':
+      from infra.collectors.douyin import collect_one as douyin_collect_one
+
+      return await douyin_collect_one(context, link)
+
+    page = await context.new_page()
+    try:
+      return await collect_fn(page, link)
+    finally:
+      await page.close()
 
   def _emit_progress(
     self,

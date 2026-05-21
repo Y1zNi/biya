@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from openpyxl import Workbook, load_workbook
 
@@ -12,7 +12,7 @@ from config import EXPORT_DIR
 from core.export_schema import get_export_headers, get_sheet_name, item_to_export_cells, normalize_platform_id
 from core.platforms import list_collectable_platform_ids
 from core.models import CollectResultItem, ExcelSheetData
-from infra.platform_detect import guess_link_column_index
+from infra.platform_detect import guess_link_column_index, looks_like_collect_link
 
 
 def read_excel_sheet(file_path: str) -> ExcelSheetData:
@@ -39,6 +39,54 @@ def extract_links_from_column(sheet_data: ExcelSheetData, column_index: int) -> 
     text = str(value).strip()
     if text:
       links.append(text)
+  return links
+
+
+def extract_first_column_links_with_rows(file_path: str) -> List[Tuple[int, str]]:
+  """读取活动表 A 列，从第 1 行起，仅返回像链接的非空单元格."""
+  workbook = load_workbook(file_path, read_only=True, data_only=True)
+  sheet = workbook.active
+  items: List[Tuple[int, str]] = []
+  for row_index, row in enumerate(sheet.iter_rows(values_only=True), start=1):
+    if not row:
+      continue
+    value = row[0]
+    if value is None:
+      continue
+    text = str(value).strip()
+    if not text or not looks_like_collect_link(text):
+      continue
+    items.append((row_index, text))
+  workbook.close()
+  return items
+
+
+def extract_links_from_text(text: str) -> List[Tuple[int, str]]:
+  """按行解析文本；行号从 1 起，仅保留像链接的非空行."""
+  items: List[Tuple[int, str]] = []
+  for line_index, line in enumerate((text or '').splitlines(), start=1):
+    value = line.strip()
+    if not value or not looks_like_collect_link(value):
+      continue
+    items.append((line_index, value))
+  return items
+
+
+def filter_links_by_row_range(
+  items: List[Tuple[int, str]],
+  start_row: int,
+  end_row: int,
+) -> List[str]:
+  """按 Excel 行号过滤链接；end_row=0 表示到最后一行."""
+  start = max(1, start_row)
+  upper = end_row if end_row > 0 else None
+  links: List[str] = []
+  for row_index, link in items:
+    if row_index < start:
+      continue
+    if upper is not None and row_index > upper:
+      continue
+    links.append(link)
   return links
 
 

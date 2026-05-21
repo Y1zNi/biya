@@ -15,9 +15,11 @@ from ui.theme import (
   COLOR_ACCENT_TEXT,
   COLOR_BORDER,
   COLOR_BORDER_LIGHT,
+  COLOR_BG,
   COLOR_ERROR,
   COLOR_ERROR_HOVER,
   COLOR_PANEL,
+  COLOR_TABLE_HEADER,
   COLOR_SUCCESS,
   COLOR_SURFACE,
   COLOR_TEXT,
@@ -136,7 +138,7 @@ class CollectResultGrid(ctk.CTkFrame):
     self.metric_indices = frozenset(metric_column_indices(platform_id))
     self.status_col_index = len(self._base_columns) - 1
     self._empty_text = empty_text or (
-      '该平台采集结果将显示在这里\n选择 Excel 并配置账号后点击「开始采集」'
+      '该平台采集结果将显示在这里\n选择 Excel（A 列放链接）后点击「开始采集」'
     )
     self._tooltip: Optional[ctk.CTkToplevel] = None
     self._row_records: List[Tuple[CollectResultItem, int]] = []
@@ -145,22 +147,22 @@ class CollectResultGrid(ctk.CTkFrame):
     self.grid_rowconfigure(0, weight=1)
     self.grid_columnconfigure(0, weight=1)
 
-    self.body_wrap = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=8)
+    self.body_wrap = ctk.CTkFrame(self, fg_color='transparent', corner_radius=0)
     self.body_wrap.pack(fill='both', expand=True)
 
     self.header = ctk.CTkFrame(
       self.body_wrap,
-      fg_color=COLOR_PANEL,
-      corner_radius=6,
+      fg_color=COLOR_TABLE_HEADER,
+      corner_radius=0,
       height=TABLE_HEADER_HEIGHT,
     )
-    self.header.pack(fill='x', pady=(0, 4))
+    self.header.pack(fill='x', pady=(0, 0))
     self.header.pack_propagate(False)
 
     self.table_scroll = ctk.CTkScrollableFrame(
       self.body_wrap,
-      fg_color=COLOR_PANEL,
-      corner_radius=8,
+      fg_color=COLOR_BG,
+      corner_radius=0,
     )
     self.table_scroll.pack(fill='both', expand=True)
 

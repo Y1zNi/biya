@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 
 from playwright.async_api import Page
 
-from config import COLLECT_PAGE_TIMEOUT
+from infra.collect.runtime_config import get_batch_page_timeout_ms
 from core.models import CollectResultItem, CollectRowStatus
 from infra.collectors.xiaohongshu_parsers import api_client
 from infra.collectors.xiaohongshu_parsers import build_item
@@ -42,7 +42,7 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
   if not note:
     explore_url = build_explore_url(info)
     try:
-      await page.goto(explore_url, wait_until='domcontentloaded', timeout=COLLECT_PAGE_TIMEOUT)
+      await page.goto(explore_url, wait_until='domcontentloaded', timeout=get_batch_page_timeout_ms())
       await xhs_page.wait_for_note_surface(page)
       await xhs_page.dismiss_overlays(page)
       await asyncio.sleep(1)

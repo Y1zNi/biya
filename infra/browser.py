@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 
 from playwright.async_api import Browser, BrowserContext
 
@@ -16,6 +16,7 @@ async def get_or_create_collect_context(
   platform_id: str,
   account: Account,
   cache: Dict[str, Tuple[Browser, BrowserContext]],
+  navigation_timeout_ms: Optional[int] = None,
 ) -> BrowserContext:
   if platform_id in cache:
     return cache[platform_id][1]
@@ -46,6 +47,7 @@ async def get_or_create_collect_context(
     locale='zh-CN',
     user_agent=user_agent,
   )
-  context.set_default_navigation_timeout(COLLECT_PAGE_TIMEOUT)
+  timeout_ms = navigation_timeout_ms if navigation_timeout_ms is not None else COLLECT_PAGE_TIMEOUT
+  context.set_default_navigation_timeout(timeout_ms)
   cache[platform_id] = (browser, context)
   return context

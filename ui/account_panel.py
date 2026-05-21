@@ -8,7 +8,7 @@ from typing import Callable, Dict, List, Optional, Set
 
 import customtkinter as ctk
 
-from config import PAGE_SIZE, PLATFORMS, format_account_display_id
+from config import PLATFORMS, format_account_display_id
 from core.platforms import get_platform_name
 from infra.database import (
   ACCOUNT_STATUS_ACTIVE,
@@ -18,8 +18,10 @@ from infra.database import (
   Account,
   Database,
 )
+from ui.layout import add_horizontal_divider
 from ui.theme import (
   COLOR_ACCENT,
+  COLOR_BG,
   COLOR_ACCENT_HOVER,
   COLOR_ACCENT_TEXT,
   COLOR_BORDER,
@@ -28,6 +30,7 @@ from ui.theme import (
   COLOR_ERROR,
   COLOR_ERROR_HOVER,
   COLOR_PANEL,
+  COLOR_TABLE_HEADER,
   COLOR_SURFACE,
   COLOR_TEXT,
   COLOR_TEXT_DIM,
@@ -35,7 +38,7 @@ from ui.theme import (
   COLOR_TABLE_SELECT,
   COLOR_WARN,
   TAB_BAR_HEIGHT,
-  TAB_SEGMENT_RADIUS,
+  SPACE_SM,
   font_body,
   font_caption,
   font_section,
@@ -63,7 +66,6 @@ class AccountManagementPanel(ctk.CTkFrame):
     self.db = db
     self.platform_id = platform_id
     self.on_status = on_status
-    self.current_page = 1
     self.selected_ids: Set[int] = set()
     self.row_check_vars: Dict[int, ctk.BooleanVar] = {}
 
@@ -71,9 +73,8 @@ class AccountManagementPanel(ctk.CTkFrame):
     self.refresh_list()
 
   def _build_ui(self) -> None:
-    toolbar = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=8, height=52)
-    toolbar.pack(fill='x', pady=(0, 10))
-    toolbar.pack_propagate(False)
+    toolbar = ctk.CTkFrame(self, fg_color='transparent')
+    toolbar.pack(fill='x', pady=(0, SPACE_SM))
 
     ctk.CTkButton(
       toolbar,
@@ -117,10 +118,15 @@ class AccountManagementPanel(ctk.CTkFrame):
       hover_color=COLOR_BORDER_LIGHT,
       text_color=COLOR_TEXT,
       command=self._on_view_logs,
-    ).pack(side='left', padx=4, pady=9)
+    ).pack(side='left', padx=4, pady=6)
 
-    header = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=6, height=36)
-    header.pack(fill='x', pady=(0, 4))
+    add_horizontal_divider(self)
+
+    table_block = ctk.CTkFrame(self, fg_color='transparent')
+    table_block.pack(fill='both', expand=True)
+
+    header = ctk.CTkFrame(table_block, fg_color=COLOR_TABLE_HEADER, height=36, corner_radius=0)
+    header.pack(fill='x')
     header.pack_propagate(False)
     cols = [
       ('', 36),
@@ -142,49 +148,16 @@ class AccountManagementPanel(ctk.CTkFrame):
       ).pack(side='left', padx=6, pady=6)
 
     self.table_scroll = ctk.CTkScrollableFrame(
-      self,
-      fg_color=COLOR_PANEL,
-      corner_radius=8,
-      height=380,
+      table_block,
+      fg_color=COLOR_BG,
+      corner_radius=0,
     )
     self.table_scroll.pack(fill='both', expand=True)
-
-    page_bar = ctk.CTkFrame(self, fg_color='transparent')
-    page_bar.pack(fill='x', pady=8)
-
-    self.prev_btn = ctk.CTkButton(
-      page_bar, text='◀ 上一页', width=90, height=30,
-      fg_color=COLOR_BORDER,
-      hover_color=COLOR_BORDER_LIGHT,
-      text_color=COLOR_TEXT,
-      command=self._prev_page,
-    )
-    self.prev_btn.pack(side='left', padx=4)
-
-    self.page_label = ctk.CTkLabel(
-      page_bar, text='第 1 / 1 页', font=font_body(), text_color=COLOR_TEXT,
-    )
-    self.page_label.pack(side='left', padx=12)
-
-    self.next_btn = ctk.CTkButton(
-      page_bar, text='下一页 ▶', width=90, height=30,
-      fg_color=COLOR_BORDER,
-      hover_color=COLOR_BORDER_LIGHT,
-      text_color=COLOR_TEXT,
-      command=self._next_page,
-    )
-    self.next_btn.pack(side='left', padx=4)
-
-    self.total_label = ctk.CTkLabel(
-      page_bar, text='', font=font_caption(), text_color=COLOR_TEXT_DIM,
-    )
-    self.total_label.pack(side='right', padx=8)
 
     self.bind('<Delete>', lambda _e: self._on_delete_accounts())
 
   def set_platform(self, platform_id: str) -> None:
     self.platform_id = platform_id
-    self.current_page = 1
     self.selected_ids.clear()
     self.refresh_list()
 
@@ -194,16 +167,10 @@ class AccountManagementPanel(ctk.CTkFrame):
     self.row_check_vars.clear()
     self.selected_ids.clear()
 
-    accounts, total = self.db.get_accounts_paginated(
-      self.platform_id, self.current_page, PAGE_SIZE,
-    )
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-
-    self.page_label.configure(text=f'第 {self.current_page} / {total_pages} 页')
-    self.total_label.configure(text=f'共 {total} 条记录')
-    self.prev_btn.configure(state='normal' if self.current_page > 1 else 'disabled')
-    self.next_btn.configure(
-      state='normal' if self.current_page < total_pages else 'disabled',
+    accounts, _total = self.db.get_accounts_paginated(
+      self.platform_id,
+      page=1,
+      page_size=10_000,
     )
 
     if not accounts:
@@ -266,18 +233,6 @@ class AccountManagementPanel(ctk.CTkFrame):
       text_color=COLOR_TEXT,
       command=lambda a=account: self._on_relogin(a),
     ).pack(side='left', padx=8, pady=6)
-
-  def _prev_page(self) -> None:
-    if self.current_page > 1:
-      self.current_page -= 1
-      self.refresh_list()
-
-  def _next_page(self) -> None:
-    _, total = self.db.get_accounts_paginated(self.platform_id, self.current_page, PAGE_SIZE)
-    total_pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
-    if self.current_page < total_pages:
-      self.current_page += 1
-      self.refresh_list()
 
   def _on_view_logs(self) -> None:
     from ui.dialogs import OperationLogsDialog
@@ -356,22 +311,8 @@ class AccountShell(ctk.CTkFrame):
     self._select_platform(self.current_platform_id)
 
   def _build_ui(self) -> None:
-    tab_card = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=8)
-    tab_card.pack(fill='x', pady=(0, 10))
-
-    tab_inner = ctk.CTkFrame(
-      tab_card,
-      fg_color=COLOR_SURFACE,
-      corner_radius=TAB_SEGMENT_RADIUS,
-      border_width=1,
-      border_color=COLOR_BORDER_LIGHT,
-    )
-    tab_inner.pack(fill='x', padx=12, pady=10)
-    tab_inner.grid_columnconfigure(0, weight=1)
-
-    tab_row = ctk.CTkFrame(tab_inner, fg_color=COLOR_PANEL, corner_radius=6)
-    tab_row.grid(row=0, column=0, sticky='ew', padx=4, pady=4)
-
+    tab_row = ctk.CTkFrame(self, fg_color='transparent')
+    tab_row.pack(fill='x', pady=(0, SPACE_SM))
     for col_index in range(len(PLATFORMS)):
       tab_row.grid_columnconfigure(col_index, weight=1)
 
@@ -386,16 +327,17 @@ class AccountShell(ctk.CTkFrame):
         height=TAB_BAR_HEIGHT - 8,
         corner_radius=6,
         font=font_body(),
-        fg_color=COLOR_SURFACE,
+        fg_color=COLOR_BG,
         hover_color=COLOR_DISABLED if not platform['enabled'] else COLOR_TABLE_SELECT,
         text_color=COLOR_TEXT_DIM if not platform['enabled'] else COLOR_TEXT,
-        border_width=1,
-        border_color=COLOR_BORDER,
+        border_width=0,
         state='disabled' if not platform['enabled'] else 'normal',
         command=lambda pid=platform['id'], en=platform['enabled']: self._on_tab_click(pid, en),
       )
-      btn.grid(row=0, column=col_index, sticky='ew', padx=2)
+      btn.grid(row=0, column=col_index, sticky='ew', padx=(0, 4))
       self.tab_buttons[platform['id']] = btn
+
+    add_horizontal_divider(self)
 
     self.subtitle_label = ctk.CTkLabel(
       self,
@@ -404,7 +346,7 @@ class AccountShell(ctk.CTkFrame):
       text_color=COLOR_TEXT_DIM,
       anchor='w',
     )
-    self.subtitle_label.pack(fill='x', pady=(0, 6))
+    self.subtitle_label.pack(fill='x', pady=(0, SPACE_SM))
 
     self.content_frame = ctk.CTkFrame(self, fg_color='transparent')
     self.content_frame.pack(fill='both', expand=True)
@@ -437,11 +379,10 @@ class AccountShell(ctk.CTkFrame):
       platform = next((p for p in PLATFORMS if p['id'] == pid), None)
       if not platform or not platform['enabled']:
         btn.configure(
-          fg_color=COLOR_PANEL,
-          hover_color=COLOR_PANEL,
+          fg_color=COLOR_BG,
+          hover_color=COLOR_BG,
           text_color=COLOR_TEXT_DIM,
-          border_color=COLOR_BORDER,
-          border_width=1,
+          border_width=0,
           font=tab_font,
         )
       elif pid == platform_id:
@@ -449,17 +390,15 @@ class AccountShell(ctk.CTkFrame):
           fg_color=COLOR_ACCENT,
           hover_color=COLOR_ACCENT_HOVER,
           text_color=COLOR_ACCENT_TEXT,
-          border_color=COLOR_ACCENT,
-          border_width=2,
+          border_width=0,
           font=tab_font_active,
         )
       else:
         btn.configure(
-          fg_color=COLOR_SURFACE,
+          fg_color=COLOR_BG,
           hover_color=COLOR_TABLE_SELECT,
           text_color=COLOR_TEXT,
-          border_color=COLOR_BORDER,
-          border_width=1,
+          border_width=0,
           font=tab_font,
         )
 

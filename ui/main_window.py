@@ -7,20 +7,20 @@ from typing import Dict, List, Optional
 
 import customtkinter as ctk
 
-from config import APP_DATA_DIR, PLATFORMS, WINDOW_SIZE, WINDOW_TITLE, ensure_dirs
+from config import PLATFORMS, WINDOW_SIZE, WINDOW_TITLE, ensure_dirs
 from infra.database import Database
 from ui.account_panel import AccountShell
 from ui.collect_panel import CollectPanel
+from ui.layout import add_horizontal_divider, add_vertical_divider
 from ui.theme import (
   COLOR_BG,
-  COLOR_PANEL,
   COLOR_SELECTED,
   COLOR_SELECTED_TEXT,
   COLOR_TEXT,
   COLOR_TEXT_DIM,
   SIDEBAR_MENU_SLOT_COUNT,
+  SPACE_MD,
   font_caption,
-  font_title,
   get_font,
 )
 
@@ -65,12 +65,18 @@ class MainApp(ctk.CTk):
     self._show_account_panel()
 
   def _build_layout(self) -> None:
-    body = ctk.CTkFrame(self, fg_color='transparent')
-    body.pack(fill='both', expand=True, padx=12, pady=12)
+    self.grid_columnconfigure(0, weight=1)
+    self.grid_rowconfigure(0, weight=1)
 
-    sidebar = ctk.CTkFrame(body, fg_color=COLOR_PANEL, corner_radius=8, width=180)
-    sidebar.pack(side='left', fill='y', padx=(0, 10))
-    sidebar.pack_propagate(False)
+    body = ctk.CTkFrame(self, fg_color=COLOR_BG)
+    body.grid(row=0, column=0, sticky='nsew')
+    body.grid_columnconfigure(2, weight=1)
+    body.grid_rowconfigure(0, weight=1)
+    body.grid_columnconfigure(1, minsize=1)
+
+    sidebar = ctk.CTkFrame(body, fg_color=COLOR_BG, width=180, corner_radius=0)
+    sidebar.grid(row=0, column=0, sticky='ns')
+    sidebar.grid_propagate(False)
     sidebar.grid_columnconfigure(0, weight=1)
     for row_index in range(SIDEBAR_MENU_SLOT_COUNT):
       sidebar.grid_rowconfigure(row_index, weight=1, uniform='sidebar_menu')
@@ -84,7 +90,7 @@ class MainApp(ctk.CTk):
         row=slot_index,
         column=0,
         sticky='nsew',
-        padx=8,
+        padx=SPACE_MD,
         pady=2,
       )
       menu_item.grid_rowconfigure(0, weight=1)
@@ -95,30 +101,26 @@ class MainApp(ctk.CTk):
         text=item['label'],
         anchor='center',
         font=get_font(14),
-        fg_color='transparent' if item['enabled'] else COLOR_PANEL,
-        hover_color=COLOR_SELECTED if item['enabled'] else COLOR_PANEL,
+        fg_color=COLOR_BG,
+        hover_color=COLOR_SELECTED if item['enabled'] else COLOR_BG,
         text_color=COLOR_TEXT_DIM if not item['enabled'] else COLOR_TEXT,
+        border_width=0,
+        corner_radius=6,
         state='normal' if item['enabled'] else 'disabled',
         command=lambda mid=item['id'], en=item['enabled']: self._on_menu_click(mid, en),
       )
       btn.grid(row=0, column=0, sticky='nsew')
       self.menu_buttons[item['id']] = btn
 
-    self.content = ctk.CTkFrame(body, fg_color='transparent')
-    self.content.pack(side='left', fill='both', expand=True)
+    add_vertical_divider(body, column=1, rowspan=1)
 
-    title_frame = ctk.CTkFrame(self.content, fg_color='transparent')
-    title_frame.pack(fill='x', pady=(0, 8))
-    self.content_title = ctk.CTkLabel(
-      title_frame,
-      text='账号管理',
-      font=font_title(),
-      text_color=COLOR_TEXT,
-    )
-    self.content_title.pack(side='left')
+    self.content = ctk.CTkFrame(body, fg_color=COLOR_BG, corner_radius=0)
+    self.content.grid(row=0, column=2, sticky='nsew', padx=(SPACE_MD, SPACE_MD), pady=SPACE_MD)
+    self.content.grid_columnconfigure(0, weight=1)
+    self.content.grid_rowconfigure(0, weight=1)
 
     self.main_panel = ctk.CTkFrame(self.content, fg_color='transparent')
-    self.main_panel.pack(fill='both', expand=True)
+    self.main_panel.grid(row=0, column=0, sticky='nsew')
 
     self.placeholder = ctk.CTkLabel(
       self.main_panel,
@@ -130,26 +132,54 @@ class MainApp(ctk.CTk):
     self.account_shell: Optional[AccountShell] = None
     self.collect_panel: Optional[CollectPanel] = None
 
-    status_bar = ctk.CTkFrame(self, fg_color=COLOR_PANEL, corner_radius=0, height=32)
-    status_bar.pack(fill='x', side='bottom')
-    status_bar.pack_propagate(False)
+    self.grid_rowconfigure(1, minsize=1)
+    add_horizontal_divider(self, row=1, pady=0)
 
-    self.status_text = ctk.StringVar(value='状态：就绪')
+    status_bar = ctk.CTkFrame(self, fg_color=COLOR_BG, corner_radius=0, height=36)
+    status_bar.grid(row=2, column=0, sticky='ew')
+    status_bar.grid_propagate(False)
+
+    self.status_text = ctk.StringVar(value='')
     ctk.CTkLabel(
       status_bar,
       textvariable=self.status_text,
       font=font_caption(),
       text_color=COLOR_TEXT_DIM,
       anchor='w',
-    ).pack(side='left', padx=16, pady=6)
+    ).pack(side='left', padx=16, pady=8)
 
+    self.progress_text = ctk.StringVar(value='就绪')
     ctk.CTkLabel(
       status_bar,
-      text=f'数据目录：{APP_DATA_DIR}',
-      font=get_font(11),
+      textvariable=self.progress_text,
+      font=font_caption(),
       text_color=COLOR_TEXT_DIM,
       anchor='e',
-    ).pack(side='right', padx=16, pady=6)
+    ).pack(side='right', padx=16, pady=8)
+
+    self._right_status_msg = '就绪'
+    self._right_progress_part = ''
+
+  def _refresh_right_bar(self) -> None:
+    if self._right_status_msg == '就绪' and not self._right_progress_part:
+      self.progress_text.set('就绪')
+      return
+    if self._right_progress_part:
+      if self._right_status_msg and self._right_status_msg != '就绪':
+        self.progress_text.set(f'{self._right_status_msg} · {self._right_progress_part}')
+      else:
+        self.progress_text.set(self._right_progress_part)
+      return
+    self.progress_text.set(self._right_status_msg or '就绪')
+
+  def set_progress_display(self, text: str) -> None:
+    self._right_progress_part = text
+    self._refresh_right_bar()
+
+  def clear_progress_display(self) -> None:
+    self._right_status_msg = '就绪'
+    self._right_progress_part = ''
+    self._refresh_right_bar()
 
   def _format_accounts_status(self) -> str:
     counts = self.db.count_active_accounts_by_platform()
@@ -166,8 +196,11 @@ class MainApp(ctk.CTk):
     return f"已登录：{' · '.join(parts)} · 共 {total}"
 
   def _update_status_bar(self, msg: str) -> None:
-    accounts_part = self._format_accounts_status()
-    self.status_text.set(f'状态：{msg} | {accounts_part}')
+    self.status_text.set(self._format_accounts_status())
+    self._right_status_msg = msg
+    if msg == '就绪':
+      self._right_progress_part = ''
+    self._refresh_right_bar()
 
   def _on_menu_click(self, menu_id: str, enabled: bool) -> None:
     if not enabled:
@@ -192,23 +225,26 @@ class MainApp(ctk.CTk):
       if mid == menu_id:
         btn.configure(fg_color=COLOR_SELECTED, text_color=COLOR_SELECTED_TEXT)
       else:
-        btn.configure(fg_color='transparent', text_color=COLOR_TEXT_DIM)
+        btn.configure(fg_color=COLOR_BG, text_color=COLOR_TEXT_DIM)
 
   def _show_account_panel(self) -> None:
     if self.current_menu == 'account' and self.account_shell is not None:
       self._highlight_menu('account')
+      self.clear_progress_display()
       return
 
     self.current_menu = 'account'
-    self.content_title.configure(text='账号管理')
     self._clear_main_panel()
     self.account_shell = AccountShell(
       self.main_panel,
       self.db,
       on_status=self._update_status_bar,
     )
-    self.account_shell.pack(fill='both', expand=True)
+    self.account_shell.grid(row=0, column=0, sticky='nsew')
+    self.main_panel.grid_rowconfigure(0, weight=1)
+    self.main_panel.grid_columnconfigure(0, weight=1)
     self._highlight_menu('account')
+    self.clear_progress_display()
     self._update_status_bar('就绪')
 
   def _show_collect_panel(self) -> None:
@@ -217,14 +253,16 @@ class MainApp(ctk.CTk):
       return
 
     self.current_menu = 'collect'
-    self.content_title.configure(text='数据采集')
     self._clear_main_panel()
     self.collect_panel = CollectPanel(
       self.main_panel,
       self.db,
       on_status=self._update_status_bar,
+      on_progress_display=self.set_progress_display,
     )
-    self.collect_panel.pack(fill='both', expand=True)
+    self.collect_panel.grid(row=0, column=0, sticky='nsew')
+    self.main_panel.grid_rowconfigure(0, weight=1)
+    self.main_panel.grid_columnconfigure(0, weight=1)
     self._highlight_menu('collect')
     self._update_status_bar('就绪')
 

@@ -38,6 +38,17 @@ def is_douyin_url(url: str) -> bool:
   return detect_platform(url).platform_id == 'douyin'
 
 
+def looks_like_collect_link(text: str) -> bool:
+  """单元格是否像可采集链接（用于排除表头行）."""
+  value = (text or '').strip()
+  if not value:
+    return False
+  lower = value.lower()
+  if lower.startswith(('http://', 'https://')):
+    return True
+  return detect_platform(value).platform_id != 'unknown'
+
+
 def guess_link_column_index(headers: list[str]) -> int:
   patterns = re.compile(r'链接|link|url|地址|视频|作品', re.I)
   for index, header in enumerate(headers):

@@ -7,7 +7,7 @@ import asyncio
 import httpx
 from playwright.async_api import Page
 
-from config import COLLECT_PAGE_TIMEOUT
+from infra.collect.runtime_config import get_batch_page_timeout_ms
 from infra.collectors.bilibili_parsers.api_client import DEFAULT_USER_AGENT
 from infra.collectors.bilibili_parsers.url import needs_url_resolve, parse_video_url
 
@@ -46,7 +46,7 @@ async def resolve_video_url(page: Page, link: str) -> str:
     return resolved
 
   try:
-    await page.goto(text, wait_until='domcontentloaded', timeout=COLLECT_PAGE_TIMEOUT)
+    await page.goto(text, wait_until='domcontentloaded', timeout=get_batch_page_timeout_ms())
     await asyncio.sleep(1.2)
     final_url = page.url or text
     if parse_video_url(final_url).is_video or parse_video_url(final_url).is_opus:

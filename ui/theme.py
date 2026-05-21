@@ -8,6 +8,9 @@ COLOR_PANEL = '#f3f3f3'
 COLOR_SURFACE = '#ffffff'
 COLOR_BORDER = '#e5e5e5'
 COLOR_BORDER_LIGHT = '#d4d4d4'
+# 区域分隔线（与 Cursor 侧边栏分割线接近，2px 避免高 DPI 下看不见）
+COLOR_DIVIDER = '#c8c8c8'
+DIVIDER_SIZE = 2
 COLOR_TEXT = '#1e1e1e'
 COLOR_TEXT_DIM = '#6e6e6e'
 COLOR_DISABLED = '#b0b0b0'

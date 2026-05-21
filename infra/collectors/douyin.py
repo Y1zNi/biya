@@ -7,7 +7,7 @@ from typing import Any, Dict, Optional
 
 from playwright.async_api import BrowserContext, Page
 
-from config import COLLECT_PAGE_TIMEOUT, COLLECT_REQUEST_INTERVAL
+from infra.collect.runtime_config import get_batch_page_timeout_ms
 from core.models import CollectResultItem, CollectRowStatus
 from infra.collectors.douyin_parsers import number_format, render_data, url as douyin_url
 from infra.collectors.douyin_parsers.api_client import (
@@ -177,7 +177,7 @@ async def get_session_page(context: BrowserContext) -> Page:
   await page.goto(
     DOUYIN_INDEX_URL,
     wait_until='domcontentloaded',
-    timeout=COLLECT_PAGE_TIMEOUT,
+    timeout=get_batch_page_timeout_ms(),
   )
   _SESSION_PAGES[key] = page
   _API_CLIENTS.pop(key, None)
@@ -256,8 +256,6 @@ async def collect_one(
   except Exception as exc:
     item.error_msg = str(exc)[:120]
     return item
-  finally:
-    await asyncio.sleep(COLLECT_REQUEST_INTERVAL)
 
 
 async def collect_one_on_page(

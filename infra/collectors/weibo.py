@@ -6,7 +6,7 @@ import asyncio
 
 from playwright.async_api import Page
 
-from config import COLLECT_PAGE_TIMEOUT
+from infra.collect.runtime_config import get_batch_page_timeout_ms
 from core.models import CollectResultItem, CollectRowStatus
 from infra.collectors.weibo_parsers import build_item
 from infra.collectors.weibo_parsers import dom_fallback
@@ -49,7 +49,7 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
     await page.goto(
       info.detail_url,
       wait_until='domcontentloaded',
-      timeout=COLLECT_PAGE_TIMEOUT,
+      timeout=get_batch_page_timeout_ms(),
     )
     await asyncio.sleep(2)
   except Exception as exc:
