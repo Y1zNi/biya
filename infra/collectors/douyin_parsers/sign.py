@@ -6,6 +6,7 @@ import asyncio
 import json
 import random
 import subprocess
+import sys
 from typing import Literal
 
 from playwright.async_api import Page
@@ -37,6 +38,14 @@ def _resolve_sign_kind(uri: str) -> SignKind:
   return 'reply' if '/reply' in uri else 'detail'
 
 
+def _subprocess_no_window_kwargs() -> dict:
+  """Windows 下隐藏 node 子进程控制台，避免打包 exe 采集时闪黑窗."""
+  if sys.platform != 'win32':
+    return {}
+  flags = getattr(subprocess, 'CREATE_NO_WINDOW', 0x08000000)
+  return {'creationflags': flags}
+
+
 def run_douyin_sign(
   kind: SignKind,
   query_string: str,
@@ -62,6 +71,7 @@ def run_douyin_sign(
     timeout=timeout_sec,
     cwd=str(get_sign_libs_dir()),
     check=False,
+    **_subprocess_no_window_kwargs(),
   )
   if proc.returncode != 0:
     err = (proc.stderr or proc.stdout or 'douyin sign failed').strip()
