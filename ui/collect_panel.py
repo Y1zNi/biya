@@ -17,7 +17,11 @@ from core.models import (
   CollectRowStatus,
   CollectSummary,
 )
-from core.platforms import get_platform_name, list_collectable_platform_ids
+from core.platforms import (
+  get_platform_name,
+  list_collectable_platform_ids,
+  requires_collect_account,
+)
 from infra.database import ACCOUNT_STATUS_EXPIRED, Account, Database
 from infra.excel import (
   export_all_platform_results,
@@ -626,6 +630,8 @@ class CollectPanel(ctk.CTkFrame):
     account_map = self.db.get_latest_collectable_account_map(required)
     missing: List[str] = []
     for platform_id in sorted(required):
+      if not requires_collect_account(platform_id):
+        continue
       if platform_id not in account_map:
         missing.append(get_platform_name(platform_id))
 

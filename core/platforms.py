@@ -12,6 +12,13 @@ _COLLECTABLE_IDS = frozenset({
   'weibo',
   'bilibili',
   'vivo',
+  'channels',
+})
+
+# 采集可不绑定账号（有账号则用 Cookie，无账号用空上下文继续）
+_OPTIONAL_ACCOUNT_PLATFORM_IDS = frozenset({
+  'vivo',
+  'channels',
 })
 
 
@@ -23,6 +30,11 @@ def can_collect(platform_id: str) -> bool:
     if platform['id'] == platform_id:
       return bool(platform.get('enabled', False))
   return False
+
+
+def requires_collect_account(platform_id: str) -> bool:
+  """开始批采前是否必须已有登录账号."""
+  return can_collect(platform_id) and platform_id not in _OPTIONAL_ACCOUNT_PLATFORM_IDS
 
 
 def get_platform_name(platform_id: str) -> str:

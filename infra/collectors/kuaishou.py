@@ -1,4 +1,4 @@
-"""快手作品链接采集：评论走 commentListQuery，播放/点赞走 DOM."""
+"""快手作品链接采集：PC 站走 DOM/GraphQL；H5 分享页（chenzhongtech）走 INIT_STATE."""
 
 from __future__ import annotations
 
@@ -11,8 +11,10 @@ from infra.collect.runtime_config import get_batch_page_timeout_ms
 from core.models import CollectResultItem, CollectRowStatus
 from infra.collectors.douyin_parsers import number_format
 from infra.collectors.kuaishou_parsers import api_client
+from infra.collectors.kuaishou_parsers import h5_state
 from infra.collectors.kuaishou_parsers import page as kuaishou_page
 from infra.collectors.kuaishou_parsers import render_data
+from infra.collectors.kuaishou_parsers import time_util as kuaishou_time
 from infra.collectors.kuaishou_parsers import url as kuaishou_url
 from infra.platform_detect import detect_platform
 
@@ -26,6 +28,10 @@ DOM_AUTHOR_SELECTORS = [
   'a.profile-user-name .profile-user-name-title',
   '.profile-user .profile-user-name-title',
 ]
+
+H5_DOM_METRIC_SELECTORS = {
+  'likes': '.right-action-bar .icon.like + .text, .right-action-bar .block .icon.like ~ .text',
+}
 
 INVALID_AUTHOR_NAMES = frozenset({
   '登录',
@@ -45,7 +51,7 @@ def map_photo_type(page_url: str) -> str:
   url_lower = (page_url or '').lower()
   if '/short-video/' in url_lower or '/video/' in url_lower:
     return '视频'
-  if '/photo/' in url_lower:
+  if '/fw/photo/' in url_lower or '/photo/' in url_lower:
     return '图片'
   return '视频'
 
@@ -75,6 +81,41 @@ def finalize_item(item: CollectResultItem) -> CollectResultItem:
   elif not item.error_msg:
     item.error_msg = '未能获取作品互动数据（作者、点赞、评论等均为空）'
   return item
+
+
+def metrics_from_photo_json(photo: dict) -> dict[str, str]:
+  stats = render_data.get_statistics_from_photo(photo)
+  metrics: dict[str, str] = {}
+
+  metrics['views'] = number_format.format_metric(
+    number_format.pick_stat_value(
+      stats,
+      'viewCount',
+      'view_count',
+      'realPlayCount',
+      'real_play_count',
+      'playCount',
+      'play_count',
+    ),
+  )
+  metrics['likes'] = number_format.format_metric(
+    number_format.pick_stat_value(
+      stats,
+      'realLikeCount',
+      'real_like_count',
+      'likeCount',
+      'like_count',
+    ),
+  )
+  comment_raw = number_format.pick_stat_value(
+    stats,
+    'commentCount',
+    'comment_count',
+  )
+  if comment_raw is None:
+    comment_raw = h5_state.photo_comment_count(photo)
+  metrics['comments'] = number_format.format_metric(comment_raw)
+  return metrics
 
 
 async def read_author_from_page_json(
@@ -112,8 +153,8 @@ async def read_dom_author(page: Page) -> str:
 def _format_metric_map(raw: dict[str, str]) -> dict[str, str]:
   formatted: dict[str, str] = {}
   for key, value in raw.items():
-    text = number_format.format_count(value)
-    if text not in ('-', ''):
+    text = number_format.format_metric(value)
+    if text not in ('',):
       formatted[key] = text
   return formatted
 
@@ -122,46 +163,21 @@ async def read_metrics_from_page_json(
   page: Page,
   photo_id: Optional[str],
 ) -> dict[str, str]:
-  """页面内嵌 JSON 中的精确 playCount / likeCount（DOM 为 2.3万 时的补充）."""
+  """PC 页内嵌 JSON 中的精确 playCount / likeCount."""
   photo = await render_data.find_photo_detail_in_page(page, photo_id)
   if not photo:
     return {}
-
-  stats = render_data.get_statistics_from_photo(photo)
-  metrics: dict[str, str] = {}
-
-  views = number_format.format_count(
-    stats.get('viewCount', stats.get('view_count', stats.get('realPlayCount', stats.get('real_play_count')))),
-  )
-  if views in ('-', ''):
-    views = number_format.format_count(
-      stats.get('playCount', stats.get('play_count')),
-    )
-  if views not in ('-', ''):
-    metrics['views'] = views
-
-  likes = number_format.format_count(
-    stats.get('realLikeCount', stats.get('real_like_count')),
-  )
-  if likes in ('-', ''):
-    likes = number_format.format_count(
-      stats.get('likeCount', stats.get('like_count')),
-    )
-  if likes not in ('-', ''):
-    metrics['likes'] = likes
-
-  return metrics
+  return metrics_from_photo_json(photo)
 
 
 def merge_metrics(dom_metrics: dict[str, str], json_metrics: dict[str, str]) -> dict[str, str]:
-  """页面 JSON 的 playCount/likeCount 为精确整数，优先于 DOM 的 2.3万 缩写."""
   merged = dict(dom_metrics)
   for key in ('views', 'likes'):
     json_value = json_metrics.get(key)
     if json_value and json_value not in ('-', ''):
       merged[key] = json_value
     elif not merged.get(key):
-      merged[key] = '-'
+      merged[key] = '0'
   return merged
 
 
@@ -174,15 +190,15 @@ async def read_dom_metrics(page: Page) -> dict[str, str]:
       loc = page.locator(selector).first
       if await loc.is_visible(timeout=1500):
         text = (await loc.inner_text()).strip()
-        formatted = number_format.format_count(text)
-        if formatted not in ('-', ''):
+        formatted = number_format.format_metric(text)
+        if formatted not in ('',):
           result[key] = formatted
     except Exception:
       continue
   return result
 
 
-async def wait_for_detail_surface(page: Page) -> None:
+async def wait_for_web_detail_surface(page: Page) -> None:
   selectors = (
     '.short-video-detail',
     '.profile-user-name-title',
@@ -200,13 +216,289 @@ async def wait_for_detail_surface(page: Page) -> None:
   await asyncio.sleep(2)
 
 
+async def wait_for_h5_detail_surface(page: Page) -> None:
+  selectors = (
+    '.photo-page',
+    '.work-info',
+    '.g-common-bar__inner__name',
+    '.right-action-bar',
+    '#app',
+  )
+  for selector in selectors:
+    try:
+      await page.wait_for_selector(selector, timeout=8000)
+      return
+    except Exception:
+      continue
+  await asyncio.sleep(2)
+
+
+async def _resolve_web_photo_id_after_navigation(
+  page: Page,
+  *,
+  link: str,
+  final_url: str,
+  preset_id: Optional[str],
+) -> str:
+  page_photo_id = await kuaishou_page.extract_photo_id_from_page(page)
+  resolved = (
+    page_photo_id
+    or kuaishou_url.extract_photo_id(final_url)
+    or preset_id
+    or kuaishou_url.extract_photo_id(link)
+  )
+  if resolved:
+    return resolved
+
+  if kuaishou_url.is_share_short_url(link):
+    redirected = await kuaishou_url.resolve_short_url(link)
+    return kuaishou_url.extract_photo_id(redirected) or ''
+
+  return ''
+
+
+async def _resolve_h5_photo_id_after_navigation(
+  page: Page,
+  *,
+  link: str,
+  final_url: str,
+  preset_id: Optional[str],
+) -> str:
+  page_photo_id = await kuaishou_page.extract_h5_photo_id_from_page(page)
+  resolved = (
+    page_photo_id
+    or kuaishou_url.extract_photo_id(final_url)
+    or preset_id
+    or kuaishou_url.extract_photo_id(link)
+  )
+  if resolved:
+    return resolved
+
+  if kuaishou_url.is_share_short_url(link):
+    redirected = await kuaishou_url.resolve_short_url(link)
+    return kuaishou_url.extract_photo_id(redirected) or ''
+
+  state = await h5_state.read_init_state(page)
+  photo = h5_state.find_photo_in_state(state, None)
+  if photo:
+    return h5_state.share_info_photo_id(photo) or render_data.get_photo_id_from_detail(photo)
+
+  return ''
+
+
+async def _goto_collect_page(page: Page, link: str) -> None:
+  collect_url = kuaishou_url.resolve_collect_entry_url(link)
+  timeout = get_batch_page_timeout_ms()
+  await page.goto(collect_url, wait_until='domcontentloaded', timeout=timeout)
+
+
+async def _try_h5_photo_api_fallback(
+  page: Page,
+  target_photo_id: Optional[str],
+) -> Optional[dict]:
+  """页面已打开后，主动触发 recommend/photos 并解析（INIT_STATE 缺失时）."""
+  timeout = get_batch_page_timeout_ms()
+  photo_id = str(target_photo_id or '').strip()
+  if not photo_id:
+    return None
+
+  try:
+    async with page.expect_response(
+      lambda response: (
+        h5_state.is_h5_photo_api_url(response.url) and response.status == 200
+      ),
+      timeout=min(timeout, 20000),
+    ) as response_info:
+      await page.evaluate(
+        """async (photoId) => {
+          const body = {
+            photoId,
+            sharePage: 'ATLAS_PICTURE_SHARE_PAGE',
+          };
+          await fetch('/rest/wd/ugH5App/recommend/photos?caver=2', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(body),
+            credentials: 'include',
+          });
+        }""",
+        photo_id,
+      )
+    response = await response_info.value
+    return await h5_state.parse_h5_photo_api_response(response)
+  except Exception:
+    return None
+
+
+async def _collect_h5_on_page(
+  page: Page,
+  item: CollectResultItem,
+  *,
+  link: str,
+  final_url: str,
+  preset_photo_id: Optional[str],
+) -> CollectResultItem:
+  await wait_for_h5_detail_surface(page)
+  await kuaishou_page.dismiss_overlays(page)
+  await asyncio.sleep(1)
+
+  target_photo_id = await _resolve_h5_photo_id_after_navigation(
+    page,
+    link=link,
+    final_url=final_url,
+    preset_id=preset_photo_id,
+  )
+  if not target_photo_id:
+    item.error_msg = '无法解析快手 H5 作品 ID'
+    return item
+
+  if not kuaishou_page.is_kuaishou_page_url(final_url):
+    item.error_msg = '链接未跳转到快手页面'
+    return item
+
+  photo = await h5_state.find_photo_on_h5_page(page, target_photo_id)
+  if not photo:
+    photo = await _try_h5_photo_api_fallback(page, target_photo_id)
+
+  author_name = ''
+  publish_time = '-'
+  metrics: dict[str, str] = {}
+
+  if photo:
+    author_name = h5_state.photo_author_name(photo)
+    if is_plausible_author(author_name):
+      item.author_name = author_name
+    publish_time = kuaishou_time.format_publish_time(photo.get('timestamp'))
+    metrics = metrics_from_photo_json(photo)
+  else:
+    item.error_msg = '未能从 H5 页面读取作品数据（INIT_STATE）'
+
+  if not is_plausible_author(item.author_name):
+    dom_author = await kuaishou_page.read_h5_dom_author(page)
+    if is_plausible_author(dom_author):
+      item.author_name = dom_author
+    else:
+      item.author_name = '-'
+
+  if publish_time in ('-', ''):
+    item.publish_time = '-'
+  else:
+    item.publish_time = publish_time
+
+  dom_metrics = _format_metric_map(await kuaishou_page.read_dom_metrics(page))
+  for key, selector in H5_DOM_METRIC_SELECTORS.items():
+    if dom_metrics.get(key):
+      continue
+    try:
+      loc = page.locator(selector).first
+      if await loc.is_visible(timeout=1500):
+        text = (await loc.inner_text()).strip()
+        formatted = number_format.format_metric(text)
+        if formatted not in ('',):
+          dom_metrics[key] = formatted
+    except Exception:
+      continue
+
+  merged = merge_metrics(dom_metrics, metrics)
+  item.views = merged.get('views') or metrics.get('views') or '0'
+  item.likes = merged.get('likes') or metrics.get('likes') or '0'
+
+  if metrics.get('comments'):
+    item.comments = metrics['comments']
+  else:
+    comment_count = await api_client.fetch_comment_count(
+      page.context.request,
+      target_photo_id,
+      final_url,
+    )
+    item.comments = number_format.format_metric(comment_count)
+
+  if photo:
+    item.media_type = h5_state.map_h5_media_type(photo, final_url)
+  else:
+    item.media_type = map_photo_type(final_url)
+
+  item = finalize_item(item)
+
+  if item.status == CollectRowStatus.FAILED and await kuaishou_page.is_login_modal_visible(page):
+    item.status = CollectRowStatus.LOGIN_EXPIRED
+    item.error_msg = '登录已过期，请重新登录账号'
+
+  return item
+
+
+async def _collect_web_on_page(
+  page: Page,
+  item: CollectResultItem,
+  *,
+  link: str,
+  final_url: str,
+  preset_photo_id: Optional[str],
+) -> CollectResultItem:
+  await wait_for_web_detail_surface(page)
+  await kuaishou_page.dismiss_overlays(page)
+  await asyncio.sleep(1)
+
+  target_photo_id = await _resolve_web_photo_id_after_navigation(
+    page,
+    link=link,
+    final_url=final_url,
+    preset_id=preset_photo_id,
+  )
+  if not target_photo_id:
+    item.error_msg = '无法解析快手作品 ID（短链跳转后仍未获取到作品 ID）'
+    return item
+
+  if not kuaishou_page.is_kuaishou_page_url(final_url):
+    item.error_msg = '链接未跳转到快手页面'
+    return item
+
+  if not await kuaishou_page.has_login_cookies(page):
+    if await kuaishou_page.is_login_modal_visible(page):
+      item.status = CollectRowStatus.LOGIN_EXPIRED
+      item.error_msg = '登录已过期，请重新登录账号'
+      return item
+
+  author_name, dom_photo_time = await asyncio.gather(
+    read_author_from_page_json(page, target_photo_id),
+    kuaishou_page.read_dom_photo_time(page),
+  )
+  if not author_name:
+    author_name = await read_dom_author(page)
+  item.author_name = author_name if author_name else '-'
+  item.publish_time = dom_photo_time if dom_photo_time not in ('-', '') else '-'
+
+  dom_metrics = await read_dom_metrics(page)
+  json_metrics = await read_metrics_from_page_json(page, target_photo_id)
+  metrics = merge_metrics(dom_metrics, json_metrics)
+  item.views = metrics.get('views') or '0'
+  item.likes = metrics.get('likes') or '0'
+
+  comment_count = await api_client.fetch_comment_count(
+    page.context.request,
+    target_photo_id,
+    final_url,
+  )
+  item.comments = number_format.format_metric(comment_count)
+
+  item.media_type = map_photo_type(final_url)
+  item = finalize_item(item)
+
+  if item.status == CollectRowStatus.FAILED and await kuaishou_page.is_login_modal_visible(page):
+    item.status = CollectRowStatus.LOGIN_EXPIRED
+    item.error_msg = '登录已过期，请重新登录账号'
+
+  return item
+
+
 async def collect_one_on_page(
   page: Page,
   link: str,
 ) -> CollectResultItem:
   platform = detect_platform(link)
-  target_photo_id = kuaishou_url.extract_photo_id(link)
-  collect_url = kuaishou_url.normalize_collect_url(link)
+  preset_photo_id = kuaishou_url.extract_photo_id(link)
+  is_short_link = kuaishou_url.is_share_short_url(link)
+  use_h5_entry = kuaishou_url.should_use_h5_collect(link)
 
   item = CollectResultItem(
     link=link,
@@ -217,72 +509,31 @@ async def collect_one_on_page(
     status=CollectRowStatus.FAILED,
   )
 
-  if not target_photo_id:
+  if not preset_photo_id and not is_short_link and not use_h5_entry:
     item.error_msg = '无法解析快手作品 ID'
     return item
 
   try:
-    await page.goto(
-      collect_url,
-      wait_until='domcontentloaded',
-      timeout=get_batch_page_timeout_ms(),
-    )
-    await wait_for_detail_surface(page)
-    await kuaishou_page.dismiss_overlays(page)
-    await asyncio.sleep(1)
-
+    await _goto_collect_page(page, link)
     final_url = page.url
     item.link = final_url
 
-    page_photo_id = await kuaishou_page.extract_photo_id_from_page(page)
-    resolved_photo_id = (
-      page_photo_id
-      or kuaishou_url.extract_photo_id(final_url)
-      or target_photo_id
+    if kuaishou_url.should_use_h5_collect(link, final_url):
+      return await _collect_h5_on_page(
+        page,
+        item,
+        link=link,
+        final_url=final_url,
+        preset_photo_id=preset_photo_id,
+      )
+
+    return await _collect_web_on_page(
+      page,
+      item,
+      link=link,
+      final_url=final_url,
+      preset_photo_id=preset_photo_id,
     )
-    if resolved_photo_id:
-      target_photo_id = resolved_photo_id
-
-    if not kuaishou_page.is_kuaishou_page_url(final_url):
-      item.error_msg = '链接未跳转到快手页面'
-      return item
-
-    if not await kuaishou_page.has_login_cookies(page):
-      if await kuaishou_page.is_login_modal_visible(page):
-        item.status = CollectRowStatus.LOGIN_EXPIRED
-        item.error_msg = '登录已过期，请重新登录账号'
-        return item
-
-    author_name, dom_photo_time = await asyncio.gather(
-      read_author_from_page_json(page, target_photo_id),
-      kuaishou_page.read_dom_photo_time(page),
-    )
-    if not author_name:
-      author_name = await read_dom_author(page)
-    item.author_name = author_name if author_name else '-'
-    item.publish_time = dom_photo_time if dom_photo_time not in ('-', '') else '-'
-
-    dom_metrics = await read_dom_metrics(page)
-    json_metrics = await read_metrics_from_page_json(page, target_photo_id)
-    metrics = merge_metrics(dom_metrics, json_metrics)
-    item.views = metrics.get('views') or '-'
-    item.likes = metrics.get('likes') or '-'
-
-    comment_count = await api_client.fetch_comment_count(
-      page.context.request,
-      target_photo_id,
-      final_url,
-    )
-    item.comments = number_format.format_count(comment_count)
-
-    item.media_type = map_photo_type(final_url)
-    item = finalize_item(item)
-
-    if item.status == CollectRowStatus.FAILED and await kuaishou_page.is_login_modal_visible(page):
-      item.status = CollectRowStatus.LOGIN_EXPIRED
-      item.error_msg = '登录已过期，请重新登录账号'
-
-    return item
   except Exception as exc:
     item.status = CollectRowStatus.FAILED
     item.error_msg = str(exc)[:120]

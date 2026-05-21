@@ -117,18 +117,23 @@ def build_item_from_aweme(
     author_name=author_name,
     publish_time=publish_time,
     views=views,
-    likes=number_format.format_count(
-      statistics.get('digg_count', statistics.get('diggCount')),
+    likes=number_format.format_metric(
+      number_format.pick_stat_value(statistics, 'digg_count', 'diggCount'),
     ),
-    favorites=number_format.format_count(
-      statistics.get('collect_count', statistics.get('collectCount')),
+    favorites=number_format.format_metric(
+      number_format.pick_stat_value(statistics, 'collect_count', 'collectCount'),
     ),
-    comments=number_format.format_count(
-      statistics.get('comment_count', statistics.get('commentCount')),
+    comments=number_format.format_metric(
+      number_format.pick_stat_value(statistics, 'comment_count', 'commentCount'),
     ),
-    shares=number_format.format_count(
-      statistics.get('share_count', statistics.get('shareCount'))
-      or statistics.get('forward_count', statistics.get('forwardCount')),
+    shares=number_format.format_metric(
+      number_format.pick_stat_value(
+        statistics,
+        'share_count',
+        'shareCount',
+        'forward_count',
+        'forwardCount',
+      ),
     ),
     media_type=map_aweme_type(aweme.get('aweme_type', aweme.get('awemeType')), page_url),
     status=CollectRowStatus.FAILED,

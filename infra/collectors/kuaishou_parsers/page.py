@@ -114,6 +114,48 @@ async def read_dom_photo_time(page: Page) -> str:
     return '-'
 
 
+async def extract_h5_photo_id_from_page(page: Page) -> str:
+  """H5 分享页：/fw/photo/{id} 或封面图 clientCacheKey."""
+  try:
+    photo_id = await page.evaluate(
+      """() => {
+        const fwMatch = location.pathname.match(/\\/fw\\/photo\\/([^/?#]+)/i);
+        if (fwMatch && fwMatch[1]) return fwMatch[1];
+
+        const img = document.querySelector('img.image[src*="clientCacheKey"], img[src*="clientCacheKey"]');
+        const src = img && (img.src || '');
+        if (!src) return '';
+
+        const keyMatch = src.match(/clientCacheKey=([^&._]+)/i);
+        return keyMatch && keyMatch[1] ? keyMatch[1] : '';
+      }"""
+    )
+    return str(photo_id or '').strip()
+  except Exception:
+    return ''
+
+
+H5_DOM_AUTHOR_SELECTORS = (
+  '.g-common-bar__inner__name',
+  '.work-info .author .txt',
+)
+
+
+async def read_h5_dom_author(page: Page) -> str:
+  for selector in H5_DOM_AUTHOR_SELECTORS:
+    try:
+      loc = page.locator(selector).first
+      if await loc.is_visible(timeout=2000):
+        text = (await loc.inner_text()).strip()
+        if text.startswith('@'):
+          text = text[1:].strip()
+        if text:
+          return text
+    except Exception:
+      continue
+  return ''
+
+
 async def read_dom_metrics(page: Page) -> dict[str, str]:
   """从作品页 DOM 读取播放量、点赞数（页面展示文案，含 2.3万 等形式）."""
   try:

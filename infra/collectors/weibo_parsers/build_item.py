@@ -34,10 +34,10 @@ def build_item_from_mblog(
     author_name=author_name,
     publish_time=publish_time,
     views='-',
-    likes=number_format.format_count(mblog.get('attitudes_count')),
+    likes=number_format.format_metric(mblog.get('attitudes_count')),
     favorites='-',
-    comments=number_format.format_count(mblog.get('comments_count')),
-    shares=number_format.format_count(mblog.get('reposts_count')),
+    comments=number_format.format_metric(mblog.get('comments_count')),
+    shares=number_format.format_metric(mblog.get('reposts_count')),
     media_type='-',
     status=CollectRowStatus.FAILED,
   )

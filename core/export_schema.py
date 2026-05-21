@@ -132,6 +132,19 @@ PLATFORM_EXPORT_HEADERS: dict[str, List[str]] = {
     '类型',
     '状态',
   ],
+  'channels': [
+    '链接',
+    '发帖平台',
+    '平台昵称',
+    *WEIBO_EXTRA_HEADERS,
+    '浏览量',
+    '点赞',
+    '收藏',
+    '评论',
+    '转发',
+    '类型',
+    '状态',
+  ],
   'unknown': BASE_EXPORT_HEADERS,
 }
 
@@ -178,6 +191,13 @@ PLATFORM_TABLE_COLUMNS: dict[str, List[TableColumn]] = {
     *WEIBO_EXTRA_TABLE_COLUMNS,
     *BASE_TABLE_COLUMNS[3:],
   ],
+  'channels': [
+    BASE_TABLE_COLUMNS[0],
+    BASE_TABLE_COLUMNS[1],
+    BASE_TABLE_COLUMNS[2],
+    *WEIBO_EXTRA_TABLE_COLUMNS,
+    *BASE_TABLE_COLUMNS[3:],
+  ],
   'unknown': BASE_TABLE_COLUMNS,
 }
 
@@ -188,6 +208,7 @@ PLATFORM_SHEET_NAMES: dict[str, str] = {
   'weibo': '微博',
   'bilibili': 'B站',
   'vivo': 'vivo社区',
+  'channels': '微信视频号',
 }
 
 
@@ -243,7 +264,7 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.media_type,
       item.status_label,
     ]
-  if pid in ('douyin', 'kuaishou', 'weibo'):
+  if pid in ('douyin', 'kuaishou', 'weibo', 'channels'):
     return [
       item.link,
       item.platform_name,

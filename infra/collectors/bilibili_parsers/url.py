@@ -1,4 +1,4 @@
-"""B 站作品链接解析（仅视频）."""
+"""B 站作品链接解析（视频 / 图文 opus）."""
 
 from __future__ import annotations
 
@@ -30,6 +30,11 @@ class VideoUrlInfo:
       return f'https://www.bilibili.com/video/{self.bvid}'
     if self.aid:
       return f'https://www.bilibili.com/video/av{self.aid}'
+    return ''
+
+  def build_canonical_opus_url(self) -> str:
+    if self.opus_id:
+      return f'https://www.bilibili.com/opus/{self.opus_id}'
     return ''
 
 

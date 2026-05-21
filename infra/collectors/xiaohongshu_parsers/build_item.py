@@ -70,25 +70,27 @@ def build_item_from_note(
   author_name = _pick_str(user, 'nickname', 'nickName', 'name') or '-'
   publish_time = format_publish_time(note.get('time') or note.get('last_update_time'))
 
-  views_raw = (
-    interact.get('view_count')
-    or interact.get('viewCount')
-    or interact.get('read_count')
-    or interact.get('readCount')
+  views = number_format.format_metric(
+    number_format.pick_stat_value(
+      interact,
+      'view_count',
+      'viewCount',
+      'read_count',
+      'readCount',
+    ),
   )
-  views = number_format.format_count(views_raw) if views_raw is not None else '-'
 
-  likes = number_format.format_count(
-    interact.get('liked_count') or interact.get('likedCount'),
+  likes = number_format.format_metric(
+    number_format.pick_stat_value(interact, 'liked_count', 'likedCount'),
   )
-  favorites = number_format.format_count(
-    interact.get('collected_count') or interact.get('collectedCount'),
+  favorites = number_format.format_metric(
+    number_format.pick_stat_value(interact, 'collected_count', 'collectedCount'),
   )
-  comments = number_format.format_count(
-    interact.get('comment_count') or interact.get('commentCount'),
+  comments = number_format.format_metric(
+    number_format.pick_stat_value(interact, 'comment_count', 'commentCount'),
   )
-  shares = number_format.format_count(
-    interact.get('share_count') or interact.get('shareCount'),
+  shares = number_format.format_metric(
+    number_format.pick_stat_value(interact, 'share_count', 'shareCount'),
   )
 
   final_link = link.strip() or build_explore_url(info)

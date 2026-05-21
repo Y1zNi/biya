@@ -63,10 +63,10 @@ def build_item_from_thread(
     note_id=tid or '-',
     author_id=str(author.get('openId') or author.get('uid') or '').strip() or '-',
     publish_time=format_publish_time(thread_data.get('publish')),
-    views=number_format.format_count(thread_data.get('views')),
-    likes=number_format.format_count(thread_data.get('likes')),
-    favorites=number_format.format_count(thread_data.get('favorites')),
-    comments=number_format.format_count(thread_data.get('comments')),
+    views=number_format.format_metric(thread_data.get('views')),
+    likes=number_format.format_metric(thread_data.get('likes')),
+    favorites=number_format.format_metric(thread_data.get('favorites')),
+    comments=number_format.format_metric(thread_data.get('comments')),
     shares='-',
     media_type=_resolve_media_type(thread_data),
     status=CollectRowStatus.FAILED,
@@ -95,6 +95,44 @@ def is_plausible_author(name: str) -> bool:
 
 def is_collect_success(item: CollectResultItem) -> bool:
   return has_meaningful_metrics(item) or is_plausible_author(item.author_name)
+
+
+def _resolve_club_media_type(data: Dict[str, Any]) -> str:
+  if data.get('hasVideo') is True:
+    return MEDIA_TYPE_VIDEO
+  if data.get('hasImage') is True:
+    return MEDIA_TYPE_IMAGE
+  return '-'
+
+
+def build_item_from_club(
+  canonical_url: str,
+  platform_name: str,
+  data: Dict[str, Any],
+  tid: str,
+) -> CollectResultItem:
+  user = data.get('user')
+  user = user if isinstance(user, dict) else {}
+  author_name = str(user.get('nickname') or '').strip() or '-'
+  note_id = str(data.get('id') or tid or '').strip()
+  publish_raw = data.get('postedAt') or data.get('createdAt')
+
+  return CollectResultItem(
+    link=canonical_url,
+    platform_id='vivo',
+    platform_name=platform_name,
+    author_name=author_name,
+    note_id=note_id or '-',
+    author_id=str(user.get('code') or user.get('username') or '').strip() or '-',
+    publish_time=format_publish_time(publish_raw),
+    views=number_format.format_metric(data.get('viewCount')),
+    likes=number_format.format_metric(data.get('likeCount')),
+    favorites=number_format.format_metric(data.get('favoriteCount')),
+    comments=number_format.format_metric(data.get('postCount')),
+    shares=number_format.format_metric(data.get('shareCount')),
+    media_type=_resolve_club_media_type(data),
+    status=CollectRowStatus.FAILED,
+  )
 
 
 def finalize_item(item: CollectResultItem) -> CollectResultItem:

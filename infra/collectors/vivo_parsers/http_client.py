@@ -1,4 +1,4 @@
-"""vivo 社区帖子页 HTTP 请求（Cookie 鉴权）."""
+"""vivo 社区帖子页 HTTP 请求（Cookie 可选，未登录也可请求）."""
 
 from __future__ import annotations
 
@@ -87,9 +87,9 @@ async def fetch_thread_html(
   info: ThreadUrlInfo,
   *,
   timeout: float = 30.0,
-) -> Tuple[Optional[str], Optional[str], bool, str]:
+) -> Tuple[Optional[str], Optional[str], str]:
   if not info.is_thread:
-    return None, '非帖子详情链接', False, ''
+    return None, '非帖子详情链接', ''
 
   url = info.build_canonical_url()
   referer = f'{VIVO_BBS_ORIGIN}/newbbs/'
@@ -105,17 +105,15 @@ async def fetch_thread_html(
       html = response.text
       final_url = str(response.url)
   except Exception as exc:
-    return None, str(exc), False, ''
+    return None, str(exc), ''
 
-  if response.status_code == 401:
-    return None, 'HTTP 401', True, final_url
   if response.status_code >= 400:
-    return None, f'HTTP {response.status_code}', False, final_url
+    return None, f'HTTP {response.status_code}', final_url
 
   if _looks_like_login_page(html, final_url):
-    return None, '需要登录或登录已过期', True, final_url
+    return None, '页面需要登录或无法获取帖子数据', final_url
 
   if '__NUXT__' not in html:
-    return None, '页面未包含帖子数据（__NUXT__）', False, final_url
+    return None, '页面未包含帖子数据（__NUXT__）', final_url
 
-  return html, None, False, final_url
+  return html, None, final_url

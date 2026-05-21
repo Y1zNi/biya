@@ -16,8 +16,11 @@ from core.models import (
   CollectRowStatus,
   CollectSummary,
 )
-from core.platforms import can_collect
-from infra.browser import get_or_create_collect_context
+from core.platforms import can_collect, requires_collect_account
+from infra.browser import (
+  get_or_create_anonymous_collect_context,
+  get_or_create_collect_context,
+)
 from infra.collect.runtime_config import (
   reset_batch_page_timeout_ms,
   set_batch_page_timeout_ms,
@@ -118,11 +121,13 @@ class CollectService:
         raise FileNotFoundError(f'账号 {account.name} 登录状态文件不存在: {state_path}')
 
     task_platform = 'mixed'
-    task_account_id = next(iter(account_by_platform.values())).id
-    if len(account_by_platform) == 1:
-      only = next(iter(account_by_platform.values()))
-      task_platform = only.platform
-      task_account_id = only.id
+    task_account_id = 0
+    if account_by_platform:
+      task_account_id = next(iter(account_by_platform.values())).id
+      if len(account_by_platform) == 1:
+        only = next(iter(account_by_platform.values()))
+        task_platform = only.platform
+        task_account_id = only.id
 
     task_id = self.db.create_collect_task(
       platform=task_platform,
@@ -153,7 +158,7 @@ class CollectService:
             continue
 
           account = account_by_platform.get(platform.platform_id)
-          if account is None:
+          if account is None and requires_collect_account(platform.platform_id):
             item = build_no_account_item(link, platform.platform_name, platform.platform_id)
             summary.failed_count += 1
             self._emit_row(task_id, item, on_row)
@@ -181,13 +186,21 @@ class CollectService:
             await _sleep_random_interval(params)
             continue
 
-          context = await get_or_create_collect_context(
-            playwright,
-            platform.platform_id,
-            account,
-            context_cache,
-            navigation_timeout_ms=params.page_timeout_ms,
-          )
+          if account is not None:
+            context = await get_or_create_collect_context(
+              playwright,
+              platform.platform_id,
+              account,
+              context_cache,
+              navigation_timeout_ms=params.page_timeout_ms,
+            )
+          else:
+            context = await get_or_create_anonymous_collect_context(
+              playwright,
+              platform.platform_id,
+              context_cache,
+              navigation_timeout_ms=params.page_timeout_ms,
+            )
 
           item = await self._collect_with_retry(
             link=link,

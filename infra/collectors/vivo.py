@@ -1,15 +1,42 @@
-"""vivo 社区帖子采集：HTTP 拉取 SSR + 解析 __NUXT__."""
+"""vivo 社区帖子采集：新站 bbs（__NUXT__）与 club 老站（API 拦截）."""
 
 from __future__ import annotations
-
-from typing import Any, Dict, List
 
 from playwright.async_api import Page
 
 from core.models import CollectResultItem, CollectRowStatus
-from infra.collectors.vivo_parsers import build_item, http_client, nuxt
+from infra.collectors.vivo_parsers import build_item, club_client, http_client, nuxt
+from infra.collectors.vivo_parsers.club_url import parse_club_thread_url
 from infra.collectors.vivo_parsers.url import parse_thread_url
 from infra.platform_detect import detect_platform
+
+
+async def _collect_club_on_page(
+  page: Page,
+  link: str,
+  platform_name: str,
+) -> CollectResultItem:
+  club_info = parse_club_thread_url(link)
+  canonical = club_info.build_canonical_url()
+  item = CollectResultItem(
+    link=link,
+    platform_id='vivo',
+    platform_name=platform_name,
+    status=CollectRowStatus.FAILED,
+  )
+
+  data, err_msg = await club_client.fetch_club_thread_data(page, club_info.tid)
+  if not data:
+    item.error_msg = err_msg or '未能获取 club 帖子数据'
+    return item
+
+  built = build_item.build_item_from_club(
+    canonical,
+    platform_name,
+    data,
+    club_info.tid,
+  )
+  return build_item.finalize_item(built)
 
 
 async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
@@ -21,29 +48,23 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
     status=CollectRowStatus.FAILED,
   )
 
+  club_info = parse_club_thread_url(link)
+  if club_info.is_thread:
+    return await _collect_club_on_page(page, link, platform.platform_name)
+
   info = parse_thread_url(link)
   if not info.is_thread:
     item.status = CollectRowStatus.UNSUPPORTED
-    item.error_msg = '仅支持 vivo 社区帖子链接（/newbbs/thread/数字）'
+    item.error_msg = (
+      '仅支持 vivo 社区帖子链接（bbs: /newbbs/thread/数字；club: /threadDetail/数字）'
+    )
     return item
 
-  cookies: List[Dict[str, Any]] = await page.context.cookies()
-  if not http_client.is_logged_in(cookies):
-    item.error_msg = '登录已过期，请重新登录 vivo 社区账号'
-    item.status = CollectRowStatus.LOGIN_EXPIRED
-    return item
-
+  cookies = await page.context.cookies()
   canonical = info.build_canonical_url()
   thread_data = None
 
-  html, err_msg, login_expired, _final_url = await http_client.fetch_thread_html(
-    cookies,
-    info,
-  )
-  if login_expired:
-    item.error_msg = '登录已过期，请重新登录 vivo 社区账号'
-    item.status = CollectRowStatus.LOGIN_EXPIRED
-    return item
+  html, err_msg, _final_url = await http_client.fetch_thread_html(cookies, info)
 
   if html:
     thread_data = await nuxt.extract_thread_data_from_html(page, html)

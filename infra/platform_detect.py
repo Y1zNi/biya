@@ -10,11 +10,11 @@ from core.platforms import can_collect
 
 PLATFORM_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
   ('douyin', '抖音', ('douyin.com', 'iesdouyin.com', 'v.douyin.com')),
-  ('kuaishou', '快手', ('kuaishou.com',)),
+  ('kuaishou', '快手', ('kuaishou.com', 'chenzhongtech.com')),
   ('xiaohongshu', '小红书', ('xiaohongshu.com', 'xhslink.com')),
   ('bilibili', 'B站', ('bilibili.com', 'b23.tv')),
   ('weibo', '微博', ('weibo.com', 'weibo.cn')),
-  ('vivo', 'vivo社区', ('bbs.vivo.com.cn',)),
+  ('vivo', 'vivo社区', ('bbs.vivo.com.cn', 'club.vivo.com.cn')),
   ('channels', '微信视频号', ('channels.weixin.qq.com',)),
 )
 
@@ -26,6 +26,9 @@ def detect_platform(url: str) -> PlatformDetectResult:
 
   if not text.startswith(('http://', 'https://')):
     text = f'https://{text}'
+
+  if 'weixin.qq.com' in text and '/sph/' in text:
+    return PlatformDetectResult('channels', '微信视频号', can_collect('channels'))
 
   for platform_id, platform_name, hosts in PLATFORM_RULES:
     for host in hosts:

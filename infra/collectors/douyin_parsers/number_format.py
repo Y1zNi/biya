@@ -3,9 +3,29 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Optional, Union
+from typing import Any, Mapping, Optional, Union
 
 _EMPTY_VALUES = frozenset({'', '-', 'none', 'null', 'undefined'})
+
+
+def pick_stat_value(data: Any, *keys: str) -> Any:
+  """取 statistics 等对象中第一个存在的键（0 为有效值，不用 or）."""
+  if not isinstance(data, Mapping):
+    return None
+  for key in keys:
+    if key in data:
+      return data[key]
+  return None
+
+
+def format_metric(value: Any, *, missing: str = '0') -> str:
+  """平台有该指标时：接口缺失填 missing（默认 0），有值（含 0）原样格式化."""
+  if value is None:
+    return missing
+  formatted = format_count(value)
+  if formatted == '-':
+    return missing
+  return formatted
 
 
 def format_count(value: Any) -> str:
