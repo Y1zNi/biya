@@ -72,6 +72,9 @@ COLLECT_MODULE_ITEMS = [
 MANUAL_LINK_SOURCE = 'manual://links'
 LINK_TEXTBOX_WIDTH = 280
 LINK_TEXTBOX_HEIGHT = 88
+PLATFORM_TAB_MIN_WIDTH = 52
+PLATFORM_TAB_MAX_WIDTH = 88
+ACTION_ROW_PLATFORM_GAP = 12
 LINK_TEXTBOX_PLACEHOLDER = (
   '每行粘贴一个链接，支持多行\n'
   '与 Excel 二选一；有内容时优先使用此处'
@@ -175,6 +178,26 @@ class CollectPanel(ctk.CTkFrame):
       self._panel_layout_after_id = self.after(LAYOUT_DEBOUNCE_MS, _run)
     except Exception:
       self._panel_layout_after_id = None
+
+  def _on_action_row_configure(self, event=None) -> None:
+    if event is not None and event.widget is not self._action_row:
+      return
+    try:
+      total_w = self._action_row.winfo_width()
+      if total_w <= 1 or not self._tab_buttons:
+        return
+      self._action_row.update_idletasks()
+      left_w = self._action_buttons_frame.winfo_reqwidth()
+      spare = total_w - left_w - ACTION_ROW_PLATFORM_GAP - 8
+      tab_count = len(self._tab_buttons)
+      per_tab = max(
+        PLATFORM_TAB_MIN_WIDTH,
+        min(PLATFORM_TAB_MAX_WIDTH, spare // tab_count),
+      )
+      for button in self._tab_buttons.values():
+        button.configure(width=per_tab)
+    except Exception:
+      pass
 
   def _show_platform_tab(self, platform_id: str) -> None:
     for pid, panel in self._platform_panels.items():
@@ -469,11 +492,17 @@ class CollectPanel(ctk.CTkFrame):
 
     add_horizontal_divider(parent, row=3, pady=(SPACE_SM, SPACE_SM))
 
-    action_row = ctk.CTkFrame(parent, fg_color='transparent')
-    action_row.grid(row=4, column=0, sticky='ew')
+    self._action_row = ctk.CTkFrame(parent, fg_color='transparent')
+    self._action_row.grid(row=4, column=0, sticky='ew')
+    self._action_row.grid_columnconfigure(0, weight=0)
+    self._action_row.grid_columnconfigure(1, weight=1)
+    self._action_row.grid_columnconfigure(2, weight=0)
+
+    self._action_buttons_frame = ctk.CTkFrame(self._action_row, fg_color='transparent')
+    self._action_buttons_frame.grid(row=0, column=0, sticky='w')
 
     self.start_btn = ctk.CTkButton(
-      action_row,
+      self._action_buttons_frame,
       text='开始采集',
       width=100,
       height=BTN_HEIGHT,
@@ -486,7 +515,7 @@ class CollectPanel(ctk.CTkFrame):
     self.start_btn.pack(side='left', padx=(0, 6))
 
     self.stop_btn = ctk.CTkButton(
-      action_row,
+      self._action_buttons_frame,
       text='停止采集',
       width=100,
       height=BTN_HEIGHT,
@@ -500,7 +529,7 @@ class CollectPanel(ctk.CTkFrame):
     self.stop_btn.pack(side='left', padx=(0, 6))
 
     self.export_current_btn = ctk.CTkButton(
-      action_row,
+      self._action_buttons_frame,
       text='导出当前平台',
       width=108,
       height=BTN_HEIGHT,
@@ -514,7 +543,7 @@ class CollectPanel(ctk.CTkFrame):
     self.export_current_btn.pack(side='left', padx=(0, 6))
 
     self.export_all_btn = ctk.CTkButton(
-      action_row,
+      self._action_buttons_frame,
       text='导出全部',
       width=88,
       height=BTN_HEIGHT,
@@ -527,27 +556,25 @@ class CollectPanel(ctk.CTkFrame):
     )
     self.export_all_btn.pack(side='left')
 
-    add_horizontal_divider(parent, row=5)
-
-    results_section = ctk.CTkFrame(parent, fg_color='transparent')
-    results_section.grid(row=6, column=0, sticky='nsew')
-    results_section.grid_rowconfigure(2, weight=1)
-    results_section.grid_columnconfigure(0, weight=1)
-
-    platform_tab_bar = ctk.CTkFrame(results_section, fg_color='transparent')
-    platform_tab_bar.grid(row=0, column=0, sticky='ew', pady=(0, SPACE_SM))
+    self._platform_tab_bar = ctk.CTkFrame(self._action_row, fg_color='transparent')
+    self._platform_tab_bar.grid(
+      row=0,
+      column=2,
+      sticky='e',
+      padx=(ACTION_ROW_PLATFORM_GAP, 0),
+    )
     self._tab_platform_ids = _collect_tab_platform_ids()
     self._tab_labels = [_tab_label(platform_id) for platform_id in self._tab_platform_ids]
     self._tab_buttons.clear()
-    for col_index in range(len(self._tab_platform_ids)):
-      platform_tab_bar.grid_columnconfigure(col_index, weight=1)
 
     tab_font = font_body(weight='bold')
+    tab_height = TAB_BAR_HEIGHT - 8
     for col_index, platform_id in enumerate(self._tab_platform_ids):
       button = ctk.CTkButton(
-        platform_tab_bar,
+        self._platform_tab_bar,
         text=self._tab_labels[col_index],
-        height=TAB_BAR_HEIGHT - 8,
+        width=PLATFORM_TAB_MIN_WIDTH,
+        height=tab_height,
         corner_radius=6,
         fg_color=COLOR_BG,
         hover_color=COLOR_SELECTED,
@@ -556,16 +583,24 @@ class CollectPanel(ctk.CTkFrame):
         font=tab_font,
         command=lambda pid=platform_id: self._on_platform_tab_clicked(pid),
       )
-      button.grid(row=0, column=col_index, sticky='ew', padx=(0, 4))
+      button.grid(row=0, column=col_index, padx=(4, 0))
       self._tab_buttons[platform_id] = button
 
     if self._tab_platform_ids:
       self._set_active_tab_button(self._tab_platform_ids[0])
 
-    add_horizontal_divider(results_section, row=1)
+    self._action_row.bind('<Configure>', self._on_action_row_configure, add='+')
+    self.after_idle(self._on_action_row_configure)
+
+    add_horizontal_divider(parent, row=5)
+
+    results_section = ctk.CTkFrame(parent, fg_color='transparent')
+    results_section.grid(row=6, column=0, sticky='nsew')
+    results_section.grid_rowconfigure(0, weight=1)
+    results_section.grid_columnconfigure(0, weight=1)
 
     self.result_content = ctk.CTkFrame(results_section, fg_color='transparent')
-    self.result_content.grid(row=2, column=0, sticky='nsew')
+    self.result_content.grid(row=0, column=0, sticky='nsew')
     self.result_content.grid_rowconfigure(0, weight=1)
     self.result_content.grid_columnconfigure(0, weight=1)
     self._build_result_tabs()
