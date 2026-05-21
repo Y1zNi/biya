@@ -357,6 +357,11 @@ class AccountShell(ctk.CTkFrame):
       return
     self._select_platform(platform_id)
 
+  def refresh_on_show(self) -> None:
+    """再次显示账号管理时刷新列表（例如从数据采集切回）."""
+    if self.account_panel is not None:
+      self.account_panel.refresh_list()
+
   def _select_platform(self, platform_id: str) -> None:
     self.current_platform_id = platform_id
     self._highlight_tab(platform_id)

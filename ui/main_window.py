@@ -198,8 +198,6 @@ class MainApp(ctk.CTk):
   def _update_status_bar(self, msg: str) -> None:
     self.status_text.set(self._format_accounts_status())
     self._right_status_msg = msg
-    if msg == '就绪':
-      self._right_progress_part = ''
     self._refresh_right_bar()
 
   def _on_menu_click(self, menu_id: str, enabled: bool) -> None:
@@ -211,14 +209,13 @@ class MainApp(ctk.CTk):
     elif menu_id == 'collect':
       self._show_collect_panel()
 
-  def _clear_main_panel(self) -> None:
+  def _hide_all_main_panels(self) -> None:
+    """隐藏主内容区面板，不销毁，便于切换菜单后保留采集结果."""
     self.placeholder.pack_forget()
-    if self.account_shell:
-      self.account_shell.destroy()
-      self.account_shell = None
-    if self.collect_panel:
-      self.collect_panel.destroy()
-      self.collect_panel = None
+    if self.account_shell is not None:
+      self.account_shell.grid_remove()
+    if self.collect_panel is not None:
+      self.collect_panel.grid_remove()
 
   def _highlight_menu(self, menu_id: str) -> None:
     for mid, btn in self.menu_buttons.items():
@@ -228,18 +225,18 @@ class MainApp(ctk.CTk):
         btn.configure(fg_color=COLOR_BG, text_color=COLOR_TEXT_DIM)
 
   def _show_account_panel(self) -> None:
-    if self.current_menu == 'account' and self.account_shell is not None:
-      self._highlight_menu('account')
-      self.clear_progress_display()
-      return
-
     self.current_menu = 'account'
-    self._clear_main_panel()
-    self.account_shell = AccountShell(
-      self.main_panel,
-      self.db,
-      on_status=self._update_status_bar,
-    )
+    self._hide_all_main_panels()
+
+    if self.account_shell is None:
+      self.account_shell = AccountShell(
+        self.main_panel,
+        self.db,
+        on_status=self._update_status_bar,
+      )
+    else:
+      self.account_shell.refresh_on_show()
+
     self.account_shell.grid(row=0, column=0, sticky='nsew')
     self.main_panel.grid_rowconfigure(0, weight=1)
     self.main_panel.grid_columnconfigure(0, weight=1)
@@ -248,23 +245,23 @@ class MainApp(ctk.CTk):
     self._update_status_bar('就绪')
 
   def _show_collect_panel(self) -> None:
-    if self.current_menu == 'collect' and self.collect_panel is not None:
-      self._highlight_menu('collect')
-      return
-
     self.current_menu = 'collect'
-    self._clear_main_panel()
-    self.collect_panel = CollectPanel(
-      self.main_panel,
-      self.db,
-      on_status=self._update_status_bar,
-      on_progress_display=self.set_progress_display,
-    )
+    self._hide_all_main_panels()
+
+    if self.collect_panel is None:
+      self.collect_panel = CollectPanel(
+        self.main_panel,
+        self.db,
+        on_status=self._update_status_bar,
+        on_progress_display=self.set_progress_display,
+      )
+
     self.collect_panel.grid(row=0, column=0, sticky='nsew')
     self.main_panel.grid_rowconfigure(0, weight=1)
     self.main_panel.grid_columnconfigure(0, weight=1)
     self._highlight_menu('collect')
     self._update_status_bar('就绪')
+    self.collect_panel.restore_progress_display()
 
 
 def run_app() -> None:

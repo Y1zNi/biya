@@ -24,6 +24,7 @@ from infra.collect.runtime_config import (
 )
 from infra.collectors.registry import get_collector
 from infra.database import Account, Database
+from infra.link_extract import normalize_collect_link
 from infra.platform_detect import detect_platform
 
 OnProgress = Callable[[CollectProgress], None]
@@ -101,6 +102,14 @@ class CollectService:
     on_row: Optional[OnRow] = None,
   ) -> CollectSummary:
     self.reset_cancel()
+
+    normalized_links: List[str] = []
+    for raw_link in links:
+      link = normalize_collect_link(raw_link)
+      if link:
+        normalized_links.append(link)
+    links = normalized_links
+
     summary = CollectSummary(total=len(links))
 
     for account in account_by_platform.values():

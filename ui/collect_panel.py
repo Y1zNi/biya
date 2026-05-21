@@ -773,6 +773,11 @@ class CollectPanel(ctk.CTkFrame):
     )
     self.on_progress_display(text)
 
+  def restore_progress_display(self) -> None:
+    """切回数据采集时恢复右侧进度统计."""
+    if self._progress_total > 0:
+      self._refresh_progress_display()
+
   def _on_start_collect(self) -> None:
     if self.is_collecting:
       return

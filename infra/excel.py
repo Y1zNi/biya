@@ -12,6 +12,7 @@ from config import EXPORT_DIR
 from core.export_schema import get_export_headers, get_sheet_name, item_to_export_cells, normalize_platform_id
 from core.platforms import list_collectable_platform_ids
 from core.models import CollectResultItem, ExcelSheetData
+from infra.link_extract import extract_collect_links_from_cell
 from infra.platform_detect import guess_link_column_index, looks_like_collect_link
 
 
@@ -56,19 +57,21 @@ def extract_first_column_links_with_rows(file_path: str) -> List[Tuple[int, str]
     text = str(value).strip()
     if not text or not looks_like_collect_link(text):
       continue
-    items.append((row_index, text))
+    for url in extract_collect_links_from_cell(text):
+      items.append((row_index, url))
   workbook.close()
   return items
 
 
 def extract_links_from_text(text: str) -> List[Tuple[int, str]]:
-  """按行解析文本；行号从 1 起，仅保留像链接的非空行."""
+  """按行解析文本；行号从 1 起，从分享文案中提取短链."""
   items: List[Tuple[int, str]] = []
   for line_index, line in enumerate((text or '').splitlines(), start=1):
     value = line.strip()
     if not value or not looks_like_collect_link(value):
       continue
-    items.append((line_index, value))
+    for url in extract_collect_links_from_cell(value):
+      items.append((line_index, url))
   return items
 
 

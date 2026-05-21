@@ -43,6 +43,7 @@ PLATFORMS = [
   {'id': 'weibo', 'name': '微博', 'enabled': True},
   {'id': 'bilibili', 'name': 'B站', 'enabled': True},
   {'id': 'vivo', 'name': 'vivo社区', 'enabled': True},
+  {'id': 'channels', 'name': '微信视频号', 'enabled': True},
 ]
 
 PLATFORM_LOGIN_URLS = {
@@ -55,6 +56,7 @@ PLATFORM_LOGIN_URLS = {
     'https://passport.vivo.com.cn/#/login?client_id=10'
     '&redirect_uri=https%3A%2F%2Fbbs.vivo.com.cn%2Fnewbbs%2F'
   ),
+  'channels': 'https://channels.weixin.qq.com/login.html',
 }
 
 

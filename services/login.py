@@ -30,6 +30,11 @@ from config import (
 from infra.collectors.douyin_parsers.page import dismiss_overlays
 from infra.collectors.bilibili_parsers.profile import fetch_bilibili_nickname
 from infra.collectors.vivo_parsers.profile import VIVO_BBS_HOME_URL, fetch_vivo_nickname
+from infra.collectors.channels_parsers.profile import (
+  CHANNELS_LOGIN_URL,
+  CHANNELS_PLATFORM_HOME,
+  fetch_channels_nickname,
+)
 from infra.collectors.weibo_parsers.profile import fetch_weibo_nickname
 from infra.collectors.xiaohongshu_parsers import initial_state as xhs_initial_state
 from shared.async_runner import run_coro_in_thread
@@ -56,6 +61,27 @@ WEIBO_QR_IMG_SELECTORS = [
 ]
 
 WEIBO_LOGIN_COOKIE_NAMES = frozenset({'SSOLoginState', 'WBPSESS'})
+
+CHANNELS_QR_IMG_SELECTORS = [
+  'canvas',
+  'img[src^="data:image"]',
+  'img[src*="qrcode"]',
+  '[class*="qrcode"] canvas',
+  '[class*="qr"] img',
+  '.qrcode img',
+]
+
+CHANNELS_LOGIN_MODAL_SELECTORS = [
+  'iframe[src*="login-for-iframe"]',
+  '.iframe-wrap iframe',
+  '.login-content iframe',
+]
+
+CHANNELS_LOGIN_COOKIE_SKIP = frozenset({
+  '_qimei_uuid',
+  '_qimei_fingerprint',
+  'MM_WX_NOTIFY_STATE',
+})
 
 BILIBILI_HOME_URL = 'https://www.bilibili.com/'
 
@@ -372,6 +398,12 @@ class LoginHandler:
         await asyncio.sleep(2)
         await self._open_vivo_scan_login(on_status)
         refresh_task = asyncio.create_task(self._qr_refresh_loop(on_status))
+      elif self.platform_id == 'channels':
+        on_status('正在打开视频号助手...')
+        await self._page.goto(CHANNELS_LOGIN_URL, wait_until='domcontentloaded', timeout=60000)
+        await asyncio.sleep(2)
+        await self._open_channels_scan_login(on_status)
+        refresh_task = asyncio.create_task(self._qr_refresh_loop(on_status))
       else:
         await self._generic_login_flow(on_status)
 
@@ -401,6 +433,8 @@ class LoginHandler:
           nickname = await self._fetch_bilibili_nickname(self._page)
         elif self.platform_id == 'vivo':
           nickname = await self._fetch_vivo_nickname(self._page)
+        elif self.platform_id == 'channels':
+          nickname = await fetch_channels_nickname(self._page)
 
       on_status('正在保存登录状态...')
       if self._context:
@@ -614,6 +648,33 @@ class LoginHandler:
 
     on_status('未能获取二维码，请关闭后重试')
 
+  async def _open_channels_scan_login(self, on_status: OnStatus) -> None:
+    """视频号助手登录页内嵌 iframe 展示微信扫码."""
+    on_status('正在准备登录...')
+    await asyncio.sleep(2)
+
+    for i in range(45):
+      if self._cancelled:
+        return
+
+      image_bytes = await self._capture_qr_from_page()
+      if image_bytes:
+        self._flow_state.qr_captured = True
+        await self._capture_baseline_login_cookies()
+        if self._on_qr_image:
+          self._on_qr_image(image_bytes)
+        on_status('请使用微信扫描二维码')
+        return
+
+      if i < 8:
+        on_status('正在加载扫码窗口...')
+      else:
+        on_status(f'正在获取二维码... ({i + 1}/45)')
+
+      await asyncio.sleep(1)
+
+    on_status('未能获取二维码，请关闭后重试')
+
   async def _click_vivo_qr_switch(self) -> bool:
     if not self._page:
       return False
@@ -781,12 +842,27 @@ class LoginHandler:
 
     targets: List[Tuple[Page | Frame, Locator]] = []
 
+    if self.platform_id == 'channels':
+      for frame in self._page.frames:
+        if frame == self._page.main_frame:
+          continue
+        frame_url = (frame.url or '').lower()
+        if 'login-for-iframe' not in frame_url and 'channels.weixin.qq.com' not in frame_url:
+          continue
+        try:
+          frame_loc = await self._find_qr_locator_in_frame(frame)
+          if frame_loc:
+            targets.append((frame, frame_loc))
+        except Exception:
+          continue
+
     # 优先在 passport / login 相关 iframe 中查找
     for frame in self._page.frames:
       if frame == self._page.main_frame:
         continue
       frame_url = (frame.url or '').lower()
-      if not any(key in frame_url for key in ('passport', 'login', 'sso')):
+      login_frame_keys = ('passport', 'login', 'sso', 'channels.weixin.qq.com', 'weixin.qq.com')
+      if not any(key in frame_url for key in login_frame_keys):
         continue
       try:
         frame_loc = await self._find_qr_locator_in_frame(frame)
@@ -852,6 +928,8 @@ class LoginHandler:
       return list(BILIBILI_LOGIN_MODAL_SELECTORS) + list(LOGIN_MODAL_SELECTORS)
     if self.platform_id == 'vivo':
       return list(VIVO_LOGIN_MODAL_SELECTORS) + list(LOGIN_MODAL_SELECTORS)
+    if self.platform_id == 'channels':
+      return list(CHANNELS_LOGIN_MODAL_SELECTORS) + list(LOGIN_MODAL_SELECTORS)
     return list(LOGIN_MODAL_SELECTORS)
 
   def _get_qr_img_selectors(self) -> List[str]:
@@ -865,6 +943,8 @@ class LoginHandler:
       return list(BILIBILI_QR_IMG_SELECTORS) + list(QR_IMG_SELECTORS)
     if self.platform_id == 'vivo':
       return list(VIVO_QR_IMG_SELECTORS) + list(QR_IMG_SELECTORS)
+    if self.platform_id == 'channels':
+      return list(CHANNELS_QR_IMG_SELECTORS) + list(QR_IMG_SELECTORS)
     return list(QR_IMG_SELECTORS)
 
   async def _get_login_modal_locator(self, page: Page) -> Optional[Locator]:
@@ -1004,6 +1084,15 @@ class LoginHandler:
           self._flow_state.logged_in = True
           await self._after_login_page_ready(page)
           return True
+      elif self.platform_id == 'channels':
+        if await self._is_channels_logged_in_ui(page):
+          self._flow_state.logged_in = True
+          await self._after_login_page_ready(page)
+          return True
+        if await self._has_channels_session_cookies(page):
+          self._flow_state.logged_in = True
+          await self._after_login_page_ready(page)
+          return True
       elif await self._is_login_modal_closed(page):
         if await self._has_real_login_cookies(page):
           self._flow_state.logged_in = True
@@ -1066,6 +1155,14 @@ class LoginHandler:
     if self.platform_id == 'vivo':
       try:
         await page.goto(VIVO_BBS_HOME_URL, wait_until='domcontentloaded', timeout=60000)
+      except Exception:
+        pass
+      await asyncio.sleep(2)
+      return
+
+    if self.platform_id == 'channels':
+      try:
+        await page.goto(CHANNELS_PLATFORM_HOME, wait_until='domcontentloaded', timeout=60000)
       except Exception:
         pass
       await asyncio.sleep(2)
@@ -1450,6 +1547,9 @@ class LoginHandler:
   async def _capture_baseline_login_cookies(self) -> None:
     if not self._page:
       return
+    if self.platform_id == 'channels':
+      await self._capture_channels_baseline_cookies()
+      return
     cookies = await self._page.context.cookies()
     names = self._login_cookie_names()
     baseline: dict[str, str] = {}
@@ -1462,6 +1562,8 @@ class LoginHandler:
   async def _has_real_login_cookies(self, page: Page) -> bool:
     if not self._flow_state.qr_captured:
       return False
+    if self.platform_id == 'channels':
+      return await self._has_channels_session_cookies(page)
     cookies = await page.context.cookies()
     names = self._login_cookie_names()
     baseline = self._flow_state.baseline_cookie_values or {}
@@ -1511,6 +1613,54 @@ class LoginHandler:
           text = (await loc.inner_text()).strip()
           if text and text not in ('登录', '注册', '立即登录'):
             return True
+      except Exception:
+        continue
+    return False
+
+  async def _capture_channels_baseline_cookies(self) -> None:
+    if not self._page:
+      return
+    cookies = await self._page.context.cookies()
+    baseline: dict[str, str] = {}
+    for cookie in cookies:
+      domain = (cookie.get('domain') or '').lower()
+      if 'weixin.qq.com' not in domain and 'channels.weixin.qq.com' not in domain:
+        continue
+      name = cookie.get('name', '')
+      value = str(cookie.get('value', '')).strip()
+      baseline[f'channels:{domain}:{name}'] = value
+    self._flow_state.baseline_cookie_values = baseline
+
+  async def _has_channels_session_cookies(self, page: Page) -> bool:
+    if not self._flow_state.qr_captured:
+      return False
+    cookies = await page.context.cookies()
+    baseline = self._flow_state.baseline_cookie_values or {}
+    for cookie in cookies:
+      domain = (cookie.get('domain') or '').lower()
+      if 'weixin.qq.com' not in domain and 'channels.weixin.qq.com' not in domain:
+        continue
+      name = cookie.get('name', '')
+      if name in CHANNELS_LOGIN_COOKIE_SKIP:
+        continue
+      value = str(cookie.get('value', '')).strip()
+      if len(value) < 4:
+        continue
+      key = f'channels:{domain}:{name}'
+      if value != baseline.get(key, ''):
+        return True
+    return False
+
+  async def _is_channels_logged_in_ui(self, page: Page) -> bool:
+    url = (page.url or '').lower()
+    if 'login.html' in url or 'login-for-iframe' in url:
+      return False
+    if 'channels.weixin.qq.com/platform' in url:
+      return True
+    for sel in CHANNELS_LOGIN_MODAL_SELECTORS:
+      try:
+        if await page.locator(sel).first.is_visible(timeout=400):
+          return False
       except Exception:
         continue
     return False

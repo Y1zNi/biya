@@ -15,6 +15,7 @@ PLATFORM_RULES: Tuple[Tuple[str, str, Tuple[str, ...]], ...] = (
   ('bilibili', 'B站', ('bilibili.com', 'b23.tv')),
   ('weibo', '微博', ('weibo.com', 'weibo.cn')),
   ('vivo', 'vivo社区', ('bbs.vivo.com.cn',)),
+  ('channels', '微信视频号', ('channels.weixin.qq.com',)),
 )
 
 
@@ -40,9 +41,13 @@ def is_douyin_url(url: str) -> bool:
 
 def looks_like_collect_link(text: str) -> bool:
   """单元格是否像可采集链接（用于排除表头行）."""
+  from infra.link_extract import extract_collect_links_from_cell
+
   value = (text or '').strip()
   if not value:
     return False
+  if extract_collect_links_from_cell(value):
+    return True
   lower = value.lower()
   if lower.startswith(('http://', 'https://')):
     return True
