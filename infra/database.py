@@ -120,6 +120,8 @@ class Database:
           author_name TEXT NOT NULL DEFAULT '',
           note_id TEXT NOT NULL DEFAULT '-',
           author_id TEXT NOT NULL DEFAULT '-',
+          author_sec_uid TEXT NOT NULL DEFAULT '-',
+          douyin_id TEXT NOT NULL DEFAULT '-',
           publish_time TEXT NOT NULL DEFAULT '-',
           views TEXT NOT NULL DEFAULT '-',
           likes TEXT NOT NULL DEFAULT '-',
@@ -141,6 +143,8 @@ class Database:
     columns = (
       ('note_id', "TEXT NOT NULL DEFAULT '-'"),
       ('author_id', "TEXT NOT NULL DEFAULT '-'"),
+      ('author_sec_uid', "TEXT NOT NULL DEFAULT '-'"),
+      ('douyin_id', "TEXT NOT NULL DEFAULT '-'"),
       ('publish_time', "TEXT NOT NULL DEFAULT '-'"),
     )
     for name, definition in columns:
@@ -367,6 +371,8 @@ class Database:
     author_name: str,
     note_id: str = '-',
     author_id: str = '-',
+    author_sec_uid: str = '-',
+    douyin_id: str = '-',
     publish_time: str = '-',
     views: str,
     likes: str,
@@ -383,14 +389,14 @@ class Database:
         """
         INSERT INTO collect_results (
           task_id, link, platform_name, author_name,
-          note_id, author_id, publish_time,
+          note_id, author_id, author_sec_uid, douyin_id, publish_time,
           views, likes, favorites, comments, shares, media_type,
           status, error_msg, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
           task_id, link, platform_name, author_name,
-          note_id, author_id, publish_time,
+          note_id, author_id, author_sec_uid, douyin_id, publish_time,
           views, likes, favorites, comments, shares, media_type,
           status, error_msg, now,
         ),

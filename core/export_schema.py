@@ -47,6 +47,22 @@ WEIBO_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('发布日期', 140, 'center'),
 ]
 
+WEIBO_PLATFORM_EXTRA_HEADERS: List[str] = ['微博id', '作者id', '发布日期']
+WEIBO_PLATFORM_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
+  ('微博id', 128, 'w'),
+  ('作者id', 128, 'w'),
+  ('发布日期', 140, 'center'),
+]
+
+DOUYIN_EXTRA_HEADERS: List[str] = ['作品id', '作者id', '作者sec_uid', '抖音号', '发布日期']
+DOUYIN_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
+  ('作品id', 128, 'w'),
+  ('作者id', 128, 'w'),
+  ('作者sec_uid', 160, 'w'),
+  ('抖音号', 128, 'w'),
+  ('发布日期', 140, 'center'),
+]
+
 BILI_EXTRA_HEADERS: List[str] = ['发布日期', '投币']
 BILI_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('发布日期', 140, 'center'),
@@ -58,7 +74,7 @@ PLATFORM_EXPORT_HEADERS: dict[str, List[str]] = {
     '链接',
     '发帖平台',
     '平台昵称',
-    *WEIBO_EXTRA_HEADERS,
+    *DOUYIN_EXTRA_HEADERS,
     '浏览量',
     '点赞',
     '收藏',
@@ -97,7 +113,7 @@ PLATFORM_EXPORT_HEADERS: dict[str, List[str]] = {
     '链接',
     '发帖平台',
     '平台昵称',
-    *WEIBO_EXTRA_HEADERS,
+    *WEIBO_PLATFORM_EXTRA_HEADERS,
     '浏览量',
     '点赞',
     '收藏',
@@ -153,7 +169,7 @@ PLATFORM_TABLE_COLUMNS: dict[str, List[TableColumn]] = {
     BASE_TABLE_COLUMNS[0],
     BASE_TABLE_COLUMNS[1],
     BASE_TABLE_COLUMNS[2],
-    *WEIBO_EXTRA_TABLE_COLUMNS,
+    *DOUYIN_EXTRA_TABLE_COLUMNS,
     *BASE_TABLE_COLUMNS[3:],
   ],
   'kuaishou': [
@@ -174,7 +190,7 @@ PLATFORM_TABLE_COLUMNS: dict[str, List[TableColumn]] = {
     BASE_TABLE_COLUMNS[0],
     BASE_TABLE_COLUMNS[1],
     BASE_TABLE_COLUMNS[2],
-    *WEIBO_EXTRA_TABLE_COLUMNS,
+    *WEIBO_PLATFORM_EXTRA_TABLE_COLUMNS,
     *BASE_TABLE_COLUMNS[3:],
   ],
   'bilibili': [
@@ -264,7 +280,41 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.media_type,
       item.status_label,
     ]
-  if pid in ('douyin', 'kuaishou', 'weibo', 'channels'):
+  if pid == 'douyin':
+    return [
+      item.link,
+      item.platform_name,
+      item.author_name,
+      item.note_id,
+      item.author_id,
+      item.author_sec_uid,
+      item.douyin_id,
+      item.publish_time,
+      item.views,
+      item.likes,
+      item.favorites,
+      item.comments,
+      item.shares,
+      item.media_type,
+      item.status_label,
+    ]
+  if pid == 'weibo':
+    return [
+      item.link,
+      item.platform_name,
+      item.author_name,
+      item.note_id,
+      item.author_id,
+      item.publish_time,
+      item.views,
+      item.likes,
+      item.favorites,
+      item.comments,
+      item.shares,
+      item.media_type,
+      item.status_label,
+    ]
+  if pid in ('kuaishou', 'channels'):
     return [
       item.link,
       item.platform_name,

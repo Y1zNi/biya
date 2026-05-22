@@ -115,6 +115,10 @@ def build_item_from_aweme(
     platform_id=platform.platform_id,
     platform_name=platform.platform_name,
     author_name=author_name,
+    note_id=render_data.get_aweme_id_from_detail(aweme) or '-',
+    author_id=render_data.get_author_uid_from_aweme(aweme) or '-',
+    author_sec_uid=render_data.get_author_sec_uid_from_aweme(aweme) or '-',
+    douyin_id=render_data.get_douyin_id_from_aweme(aweme) or '-',
     publish_time=publish_time,
     views=views,
     likes=number_format.format_metric(

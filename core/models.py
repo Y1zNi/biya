@@ -29,6 +29,8 @@ class CollectResultItem:
   author_name: str = ''
   note_id: str = '-'
   author_id: str = '-'
+  author_sec_uid: str = '-'
+  douyin_id: str = '-'
   publish_time: str = '-'
   views: str = '-'
   likes: str = '-'

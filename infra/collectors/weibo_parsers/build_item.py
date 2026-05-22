@@ -23,7 +23,8 @@ def build_item_from_mblog(
   info: NoteUrlInfo,
 ) -> CollectResultItem:
   user = _pick_user(mblog)
-  note_id = str(mblog.get('id') or info.note_id or '').strip()
+  note_id = str(mblog.get('id') or mblog.get('mid') or info.note_id or '').strip()
+  author_id = str(user.get('id') or user.get('idstr') or '').strip()
   author_name = str(user.get('screen_name') or user.get('name') or '').strip() or '-'
   publish_time = format_publish_time(mblog.get('created_at'))
 
@@ -32,6 +33,8 @@ def build_item_from_mblog(
     platform_id='weibo',
     platform_name=platform_name,
     author_name=author_name,
+    note_id=note_id or '-',
+    author_id=author_id or '-',
     publish_time=publish_time,
     views='-',
     likes=number_format.format_metric(mblog.get('attitudes_count')),

@@ -92,6 +92,45 @@ def get_aweme_id_from_detail(obj: Dict[str, Any]) -> str:
   return ''
 
 
+def _pick_author_from_aweme(aweme: Dict[str, Any]) -> Dict[str, Any]:
+  author = aweme.get('author')
+  return author if isinstance(author, dict) else {}
+
+
+def _pick_author_str(author: Dict[str, Any], *keys: str) -> str:
+  for key in keys:
+    value = author.get(key)
+    if value is not None and str(value).strip():
+      return str(value).strip()
+  return ''
+
+
+def get_author_uid_from_aweme(aweme: Dict[str, Any]) -> str:
+  return _pick_author_str(
+    _pick_author_from_aweme(aweme),
+    'uid',
+    'uid_str',
+    'user_id',
+    'userId',
+  )
+
+
+def get_author_sec_uid_from_aweme(aweme: Dict[str, Any]) -> str:
+  return _pick_author_str(
+    _pick_author_from_aweme(aweme),
+    'sec_uid',
+    'secUid',
+  )
+
+
+def get_douyin_id_from_aweme(aweme: Dict[str, Any]) -> str:
+  return _pick_author_str(
+    _pick_author_from_aweme(aweme),
+    'unique_id',
+    'uniqueId',
+  )
+
+
 def get_group_id_from_detail(obj: Dict[str, Any]) -> str:
   for key in ('group_id', 'groupId'):
     value = obj.get(key)

@@ -70,6 +70,8 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
   else:
     item.link = info.detail_url
     dom_fallback.fill_from_dom(html, item)
+    if info.note_id:
+      item.note_id = info.note_id
 
   item.media_type = weibo_page.infer_media_type_from_html(html)
   return build_item.finalize_item(item)

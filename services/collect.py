@@ -334,6 +334,8 @@ class CollectService:
       author_name=item.author_name,
       note_id=item.note_id,
       author_id=item.author_id,
+      author_sec_uid=item.author_sec_uid,
+      douyin_id=item.douyin_id,
       publish_time=item.publish_time,
       views=item.views,
       likes=item.likes,

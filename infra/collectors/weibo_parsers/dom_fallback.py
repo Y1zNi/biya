@@ -123,6 +123,10 @@ def fill_from_dom(html: str, item: CollectResultItem) -> CollectResultItem:
   if likes != '-':
     item.likes = likes
 
+  author_id = _extract_text(r'/profile/(\d+)', html, 1)
+  if author_id:
+    item.author_id = author_id
+
   item.views = '-'
   item.favorites = '-'
   return item
