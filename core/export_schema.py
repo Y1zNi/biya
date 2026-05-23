@@ -90,6 +90,12 @@ BILI_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('投币', 72, 'center'),
 ]
 
+VIVO_EXTRA_HEADERS: List[str] = ['作者id', '发布日期']
+VIVO_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
+  ('作者id', 128, 'w'),
+  ('发布日期', 140, 'center'),
+]
+
 PLATFORM_EXPORT_HEADERS: dict[str, List[str]] = {
   'douyin': [
     '链接',
@@ -160,7 +166,7 @@ PLATFORM_EXPORT_HEADERS: dict[str, List[str]] = {
     '链接',
     '发帖平台',
     '平台昵称',
-    *WEIBO_EXTRA_HEADERS,
+    *VIVO_EXTRA_HEADERS,
     '浏览量',
     '点赞',
     '收藏',
@@ -225,7 +231,7 @@ PLATFORM_TABLE_COLUMNS: dict[str, List[TableColumn]] = {
     BASE_TABLE_COLUMNS[0],
     BASE_TABLE_COLUMNS[1],
     BASE_TABLE_COLUMNS[2],
-    *WEIBO_EXTRA_TABLE_COLUMNS,
+    *VIVO_EXTRA_TABLE_COLUMNS,
     *BASE_TABLE_COLUMNS[3:],
   ],
   'channels': [
@@ -387,6 +393,7 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.link,
       item.platform_name,
       item.author_name,
+      item.author_id,
       item.publish_time,
       item.views,
       item.likes,

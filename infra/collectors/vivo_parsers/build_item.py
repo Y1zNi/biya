@@ -61,7 +61,7 @@ def build_item_from_thread(
     platform_name=platform_name,
     author_name=author_name,
     note_id=tid or '-',
-    author_id=str(author.get('openId') or author.get('uid') or '').strip() or '-',
+    author_id=str(author.get('uid') or author.get('vivoNumber') or author.get('openId') or '').strip() or '-',
     publish_time=format_publish_time(thread_data.get('publish')),
     views=number_format.format_metric(thread_data.get('views')),
     likes=number_format.format_metric(thread_data.get('likes')),
