@@ -5,9 +5,20 @@ from __future__ import annotations
 import json
 import re
 import urllib.parse
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from playwright.async_api import Page
+
+_VISION_PHOTO_TYPENAMES = frozenset({
+  'VisionVideoDetailPhoto',
+  'VisionVideoPhoto',
+  'Photo',
+})
+_VISION_AUTHOR_TYPENAMES = frozenset({
+  'VisionVideoDetailAuthor',
+  'VisionVideoAuthor',
+  'User',
+})
 
 _PHOTO_DETAIL_KEYS = (
   'photo',
@@ -243,6 +254,113 @@ def find_photo_in_page_datasets(
   for data in datasets:
     candidates.extend(collect_photo_details(data))
   return pick_best_photo(candidates, target_photo_id)
+
+
+def _collect_vision_entities(
+  obj: Any,
+  depth: int,
+  photo_nodes: List[Dict[str, Any]],
+  author_nodes: List[Dict[str, Any]],
+) -> None:
+  if depth > 16:
+    return
+
+  if isinstance(obj, dict):
+    typename = str(obj.get('__typename') or obj.get('typeName') or '').strip()
+    if typename in _VISION_PHOTO_TYPENAMES or (
+      typename and 'Photo' in typename and get_photo_id_from_detail(obj)
+    ):
+      photo_nodes.append(obj)
+    if typename in _VISION_AUTHOR_TYPENAMES or (
+      typename and 'Author' in typename and obj.get('id')
+    ):
+      author_nodes.append(obj)
+
+    for value in obj.values():
+      _collect_vision_entities(value, depth + 1, photo_nodes, author_nodes)
+
+  elif isinstance(obj, list):
+    for item in obj[:200]:
+      _collect_vision_entities(item, depth + 1, photo_nodes, author_nodes)
+
+
+def _match_vision_photo(
+  nodes: List[Dict[str, Any]],
+  target_photo_id: str,
+) -> Optional[Dict[str, Any]]:
+  matched = [
+    node for node in nodes
+    if photo_matches_target(node, target_photo_id)
+    or str(node.get('id') or '').strip() == target_photo_id
+  ]
+  if not matched:
+    return None
+  matched.sort(
+    key=lambda item: (
+      0 if statistics_has_values(get_statistics_from_photo(item)) else 1,
+      -len(get_photo_id_from_detail(item)),
+    ),
+  )
+  return matched[0]
+
+
+def _resolve_vision_author(
+  photo: Dict[str, Any],
+  author_nodes: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+  embedded = get_author_from_photo(photo)
+  if embedded:
+    return embedded
+
+  author_ref = photo.get('author')
+  if isinstance(author_ref, dict):
+    return author_ref
+
+  author_id = str(
+    photo.get('authorId')
+    or photo.get('author_id')
+    or photo.get('userId')
+    or photo.get('user_id')
+    or '',
+  ).strip()
+  if not author_id:
+    return {}
+
+  for node in author_nodes:
+    node_id = str(node.get('id') or '').strip()
+    if node_id and node_id == author_id:
+      return node
+  return {}
+
+
+def find_vision_detail_bundle(
+  datasets: List[Dict[str, Any]],
+  target_photo_id: Optional[str] = None,
+) -> Tuple[Optional[Dict[str, Any]], Dict[str, Any]]:
+  """在 Apollo 状态中定位作品与作者实体，返回 (merged_photo, author)."""
+  target_id = str(target_photo_id or '').strip()
+  if not target_id:
+    photo = find_photo_in_page_datasets(datasets, None)
+    author = get_author_from_photo(photo) if photo else {}
+    return photo, author
+
+  photo_nodes: List[Dict[str, Any]] = []
+  author_nodes: List[Dict[str, Any]] = []
+  for data in datasets:
+    _collect_vision_entities(data, 0, photo_nodes, author_nodes)
+
+  photo = _match_vision_photo(photo_nodes, target_id)
+  if not photo:
+    photo = find_photo_in_page_datasets(datasets, target_id)
+
+  author = _resolve_vision_author(photo, author_nodes) if photo else {}
+  if not photo:
+    return None, author
+
+  merged = dict(photo)
+  if author:
+    merged['author'] = author
+  return merged, author
 
 
 def extract_comment_count_from_payload(payload: Any) -> Any:

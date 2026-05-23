@@ -63,6 +63,26 @@ DOUYIN_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('发布日期', 140, 'center'),
 ]
 
+# KUAISHOU_EXTRA_HEADERS: List[str] = ['作品id', '作者uid', '快手号', '发布日期']
+KUAISHOU_EXTRA_HEADERS: List[str] = [
+  # '作品id',
+  '作者uid',
+  # '快手号',
+  '发布日期',
+]
+# KUAISHOU_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
+#   ('作品id', 128, 'w'),
+#   ('作者uid', 128, 'w'),
+#   ('快手号', 128, 'w'),
+#   ('发布日期', 140, 'center'),
+# ]
+KUAISHOU_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
+  # ('作品id', 128, 'w'),
+  ('作者uid', 128, 'w'),
+  # ('快手号', 128, 'w'),
+  ('发布日期', 140, 'center'),
+]
+
 BILI_EXTRA_HEADERS: List[str] = ['发布日期', '投币']
 BILI_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('发布日期', 140, 'center'),
@@ -87,7 +107,7 @@ PLATFORM_EXPORT_HEADERS: dict[str, List[str]] = {
     '链接',
     '发帖平台',
     '平台昵称',
-    *WEIBO_EXTRA_HEADERS,
+    *KUAISHOU_EXTRA_HEADERS,
     '浏览量',
     '点赞',
     '收藏',
@@ -176,7 +196,7 @@ PLATFORM_TABLE_COLUMNS: dict[str, List[TableColumn]] = {
     BASE_TABLE_COLUMNS[0],
     BASE_TABLE_COLUMNS[1],
     BASE_TABLE_COLUMNS[2],
-    *WEIBO_EXTRA_TABLE_COLUMNS,
+    *KUAISHOU_EXTRA_TABLE_COLUMNS,
     *BASE_TABLE_COLUMNS[3:],
   ],
   'xiaohongshu': [
@@ -314,7 +334,24 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.media_type,
       item.status_label,
     ]
-  if pid in ('kuaishou', 'channels'):
+  if pid == 'kuaishou':
+    return [
+      item.link,
+      item.platform_name,
+      item.author_name,
+      # item.note_id,
+      item.author_id,
+      # item.author_sec_uid,
+      item.publish_time,
+      item.views,
+      item.likes,
+      item.favorites,
+      item.comments,
+      item.shares,
+      item.media_type,
+      item.status_label,
+    ]
+  if pid == 'channels':
     return [
       item.link,
       item.platform_name,

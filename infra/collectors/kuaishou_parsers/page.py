@@ -7,6 +7,8 @@ from typing import FrozenSet
 
 from playwright.async_api import Page
 
+from infra.collectors.kuaishou_parsers import h5_author
+from infra.collectors.kuaishou_parsers import ids as kuaishou_ids
 from infra.collectors.kuaishou_parsers.time_util import format_dom_photo_time
 
 LOGIN_COOKIE_NAMES: FrozenSet[str] = frozenset({
@@ -154,6 +156,86 @@ async def read_h5_dom_author(page: Page) -> str:
     except Exception:
       continue
   return ''
+
+
+async def read_h5_author_hints(page: Page) -> dict[str, str]:
+  """从 H5 页面 URL、作者区链接与 INIT_STATE 提取 uid / eid / 头像."""
+  try:
+    raw = await page.evaluate(
+      """() => {
+        const result = { uid: '', eid: '', headurl: '' };
+        const pickQuery = (search) => {
+          if (!search) return;
+          const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+          const fid = params.get('fid') || '';
+          if (/^\\d+$/.test(fid) && !result.uid) result.uid = fid;
+          for (const key of ['efid', 'userEid', 'eid']) {
+            const value = params.get(key) || '';
+            if (value && !/^\\d+$/.test(value) && !result.eid) {
+              result.eid = value;
+              break;
+            }
+          }
+          const userId = params.get('userId') || '';
+          if (/^\\d+$/.test(userId) && !result.uid) result.uid = userId;
+          else if (userId && !/^\\d+$/.test(userId) && !result.eid) result.eid = userId;
+        };
+        pickQuery(location.search || '');
+
+        const selectors = [
+          'a[href*="fid="]',
+          'a[href*="efid="]',
+          'a[href*="userEid="]',
+          'a[href*="/profile/"]',
+          '.g-common-bar a[href]',
+          '.work-info a[href]',
+        ];
+        for (const sel of selectors) {
+          document.querySelectorAll(sel).forEach((node) => {
+            const href = node.href || node.getAttribute('href') || '';
+            if (!href) return;
+            try {
+              const url = new URL(href, location.href);
+              pickQuery(url.search || '');
+              const profileMatch = url.pathname.match(/\\/profile\\/([^/?#]+)/i);
+              if (profileMatch && profileMatch[1]) {
+                const token = profileMatch[1];
+                if (/^\\d{8,}$/.test(token) && !result.uid) result.uid = token;
+                else if (token && !/^\\d+$/.test(token) && !result.eid) result.eid = token;
+              }
+            } catch (e) {}
+          });
+        }
+
+        const head = document.querySelector(
+          '.g-common-bar img, .work-info img, img[class*="avatar"], img[class*="head"]',
+        );
+        if (head && (head.src || head.getAttribute('src'))) {
+          result.headurl = head.src || head.getAttribute('src') || '';
+        }
+        return result;
+      }"""
+    )
+    if isinstance(raw, dict):
+      hints = {
+        'uid': str(raw.get('uid') or '').strip(),
+        'eid': str(raw.get('eid') or '').strip(),
+        'headurl': str(raw.get('headurl') or '').strip(),
+      }
+      for url in (page.url,):
+        url_hints = h5_author.parse_author_hints_from_href(url)
+        for key in ('uid', 'eid', 'headurl'):
+          if hints.get(key):
+            continue
+          value = str(url_hints.get(key) or '').strip()
+          if value:
+            hints[key] = value
+      if not hints['uid'] and hints['headurl']:
+        hints['uid'] = kuaishou_ids.extract_uid_from_cdn_url(hints['headurl'])
+      return hints
+  except Exception:
+    pass
+  return {'uid': '', 'eid': '', 'headurl': ''}
 
 
 async def read_dom_metrics(page: Page) -> dict[str, str]:

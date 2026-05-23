@@ -83,14 +83,70 @@ def is_h5_photo_api_url(url: str) -> bool:
   return any(marker in lower for marker in _H5_PHOTO_API_MARKERS)
 
 
-async def parse_h5_photo_api_response(response: Response) -> Optional[Dict[str, Any]]:
+def _iter_api_feed_lists(payload: Any) -> List[List[Dict[str, Any]]]:
+  feeds_lists: List[List[Dict[str, Any]]] = []
+  if not isinstance(payload, dict):
+    return feeds_lists
+
+  for key in ('feeds', 'feedList', 'photoList', 'photos', 'items', 'list'):
+    items = payload.get(key)
+    if isinstance(items, list) and items:
+      dict_items = [item for item in items if isinstance(item, dict)]
+      if dict_items:
+        feeds_lists.append(dict_items)
+
+  data = payload.get('data')
+  if isinstance(data, dict):
+    for value in data.values():
+      if isinstance(value, dict):
+        for key in ('feeds', 'feedList', 'photoList', 'photos', 'items', 'list'):
+          items = value.get(key)
+          if isinstance(items, list) and items:
+            dict_items = [item for item in items if isinstance(item, dict)]
+            if dict_items:
+              feeds_lists.append(dict_items)
+  return feeds_lists
+
+
+def find_photo_in_api_payload(
+  payload: Any,
+  target_photo_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+  target_id = str(target_photo_id or '').strip()
+  if not target_id:
+    return render_data.extract_photo_from_api_payload(payload)
+
+  candidates: List[Dict[str, Any]] = []
+  for feeds in _iter_api_feed_lists(payload):
+    matched = [item for item in feeds if photo_matches_target_h5(item, target_id)]
+    candidates.extend(matched)
+
+  if candidates:
+    candidates.sort(
+      key=lambda item: (
+        0 if render_data.statistics_has_values(render_data.get_statistics_from_photo(item)) else 1,
+        -len(render_data.get_photo_id_from_detail(item)),
+      ),
+    )
+    return candidates[0]
+
+  found = render_data.find_photo_detail(payload, target_id)
+  if found and photo_matches_target_h5(found, target_id):
+    return found
+  return None
+
+
+async def parse_h5_photo_api_response(
+  response: Response,
+  target_photo_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
   try:
     if response.status != 200 or not is_h5_photo_api_url(response.url):
       return None
     payload = await response.json()
   except Exception:
     return None
-  return render_data.extract_photo_from_api_payload(payload)
+  return find_photo_in_api_payload(payload, target_photo_id)
 
 
 def photo_author_name(photo: Dict[str, Any]) -> str:
