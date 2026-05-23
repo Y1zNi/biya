@@ -70,15 +70,16 @@ def build_item_from_note(
   author_name = _pick_str(user, 'nickname', 'nickName', 'name') or '-'
   publish_time = format_publish_time(note.get('time') or note.get('last_update_time'))
 
-  views = number_format.format_metric(
-    number_format.pick_stat_value(
-      interact,
-      'view_count',
-      'viewCount',
-      'read_count',
-      'readCount',
-    ),
+  view_count = number_format.pick_stat_value(
+    interact,
+    'view_count',
+    'viewCount',
+    'read_count',
+    'readCount',
   )
+  views = number_format.format_count(view_count)
+  if views == '0':
+    views = '-'
 
   likes = number_format.format_metric(
     number_format.pick_stat_value(interact, 'liked_count', 'likedCount'),
