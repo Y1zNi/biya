@@ -83,8 +83,9 @@ KUAISHOU_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('发布日期', 140, 'center'),
 ]
 
-BILI_EXTRA_HEADERS: List[str] = ['发布日期', '投币']
+BILI_EXTRA_HEADERS: List[str] = ['作者id', '发布日期', '投币']
 BILI_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
+  ('作者id', 128, 'w'),
   ('发布日期', 140, 'center'),
   ('投币', 72, 'center'),
 ]
@@ -370,6 +371,7 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.link,
       item.platform_name,
       item.author_name,
+      item.author_id,
       item.publish_time,
       item.coins,
       item.views,
