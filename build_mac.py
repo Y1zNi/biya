@@ -135,11 +135,45 @@ def embed_playwright_into_app() -> None:
   shutil.copytree(BUNDLE_DIR, target)
 
 
+def _codesign_adhoc(target: Path) -> bool:
+  print('>', 'codesign', '-', target)
+  completed = subprocess.run(
+    ['codesign', '--force', '--sign', '-', str(target)],
+    check=False,
+    capture_output=True,
+    text=True,
+  )
+  if completed.returncode != 0:
+    stderr = (completed.stderr or completed.stdout or '').strip()
+    print(f'Warning: codesign failed for {target}: {stderr}')
+    return False
+  return True
+
+
 def maybe_codesign() -> None:
   if os.environ.get('CODESIGN_APP') != '1':
     return
-  print('=== Ad-hoc codesign ===')
-  run(['codesign', '--force', '--deep', '--sign', '-', str(APP_DIR)])
+  print('=== Ad-hoc codesign (inside-out, no --deep) ===')
+  macos_dir = APP_DIR / 'Contents' / 'MacOS'
+  nested_targets = sorted(
+    {
+      *macos_dir.rglob('*.framework'),
+      *macos_dir.rglob('*.app'),
+    },
+    key=lambda path: len(path.parts),
+    reverse=True,
+  )
+  for target in nested_targets:
+    if target == APP_DIR:
+      continue
+    _codesign_adhoc(target)
+
+  main_exe = macos_dir / APP_NAME
+  if main_exe.is_file():
+    _codesign_adhoc(main_exe)
+
+  if not _codesign_adhoc(APP_DIR):
+    print('Warning: outer .app ad-hoc sign failed; release zip will still be created.')
 
 
 def get_enabled_platform_names() -> str:
