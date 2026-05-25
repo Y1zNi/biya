@@ -73,5 +73,5 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
     if info.note_id:
       item.note_id = info.note_id
 
-  item.media_type = weibo_page.infer_media_type_from_html(html)
+  item.media_type = weibo_page.infer_media_type(mblog, html)
   return build_item.finalize_item(item)
