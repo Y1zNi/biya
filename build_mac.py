@@ -55,7 +55,7 @@ def get_ms_playwright_dir() -> Path:
 def ensure_dependencies() -> None:
   run([sys.executable, '-m', 'pip', 'install', '-r', str(ROOT / 'requirements.txt')])
   run([sys.executable, '-m', 'pip', 'install', 'pyinstaller'])
-  run([sys.executable, '-m', 'playwright', 'install', 'chromium'])
+  run([sys.executable, '-m', 'playwright', 'install', '--with-deps', 'chromium'])
 
 
 def stage_playwright_browsers() -> None:

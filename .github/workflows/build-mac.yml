@@ -24,13 +24,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
+      - name: Setup Python (Homebrew, includes tkinter)
+        run: |
+          brew install python@3.12
+          echo "$(brew --prefix python@3.12)/bin" >> "$GITHUB_PATH"
+          python3.12 --version
+          python3.12 -c "import tkinter; print('tkinter ok', tkinter.TkVersion)"
 
       - name: Build .app bundle
-        run: python build_mac.py
+        run: python3.12 build_mac.py
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
