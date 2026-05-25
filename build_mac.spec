@@ -10,7 +10,6 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 project_root = Path(SPECPATH)
-bundle_browsers = project_root / '_bundle' / 'ms-playwright'
 
 hiddenimports = [
   'sqlite3',
@@ -23,13 +22,7 @@ hiddenimports = [
 datas = []
 binaries = []
 
-if bundle_browsers.is_dir():
-  datas.append((str(bundle_browsers), 'ms-playwright'))
-else:
-  raise SystemExit(
-    f'Missing browser bundle: {bundle_browsers}\n'
-    'Run python build_mac.py first (downloads and stages Chromium).'
-  )
+# ms-playwright 在 build_mac.py 打包完成后复制进 .app，避免 PyInstaller 对 Chromium.app codesign 失败
 
 douyin_sign_libs = project_root / 'infra' / 'collectors' / 'douyin_parsers' / 'libs'
 if not (douyin_sign_libs / 'douyin.js').is_file():
@@ -103,7 +96,7 @@ exe = EXE(
   disable_windowed_traceback=False,
   argv_emulation=False,
   target_arch=None,
-  codesign_identity=None,
+  codesign_identity=False,
   entitlements_file=None,
 )
 
@@ -116,6 +109,8 @@ coll = COLLECT(
   upx=False,
   upx_exclude=[],
   name=EXE_NAME,
+  codesign_identity=False,
+  entitlements_file=None,
 )
 
 app = BUNDLE(

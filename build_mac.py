@@ -126,6 +126,15 @@ def build_app() -> None:
     raise FileNotFoundError(f'App bundle not found: {APP_DIR}')
 
 
+def embed_playwright_into_app() -> None:
+  """Chromium.app 不能经 PyInstaller COLLECT（会触发 codesign 失败），打包后手动复制。"""
+  target = APP_DIR / 'Contents' / 'MacOS' / 'ms-playwright'
+  if target.exists():
+    shutil.rmtree(target)
+  print(f'Embedding browsers into app: {BUNDLE_DIR} -> {target}')
+  shutil.copytree(BUNDLE_DIR, target)
+
+
 def maybe_codesign() -> None:
   if os.environ.get('CODESIGN_APP') != '1':
     return
@@ -208,6 +217,7 @@ def main() -> None:
   stage_node_runtime()
   print('=== Building .app bundle (large, please wait) ===')
   build_app()
+  embed_playwright_into_app()
   maybe_codesign()
   zip_path = create_zip()
   app_size = sum(f.stat().st_size for f in APP_DIR.rglob('*') if f.is_file())
