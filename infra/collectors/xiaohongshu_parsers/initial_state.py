@@ -63,3 +63,26 @@ def nickname_from_user_page(user_page: Optional[dict]) -> str:
     if value:
       return value
   return ''
+
+
+def red_id_from_user_page(user_page: Optional[dict]) -> str:
+  if not user_page:
+    return ''
+  basic = user_page.get('basicInfo') or user_page.get('basic_info') or {}
+  if not isinstance(basic, dict):
+    return ''
+  for key in ('red_id', 'redId', 'xhs_id', 'xhsId', 'display_id', 'displayId'):
+    value = str(basic.get(key, '')).strip()
+    if value and value not in ('-', 'None'):
+      return value
+  return ''
+
+
+def red_id_from_initial_state_html(html: str) -> str:
+  data = parse_initial_state_script(html or '')
+  if not data:
+    return ''
+  user_page = get_user_page_data(data)
+  if not user_page:
+    user_page = find_user_page_data(data)
+  return red_id_from_user_page(user_page)

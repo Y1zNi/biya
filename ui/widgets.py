@@ -74,7 +74,7 @@ def _column_min_width(title: str, anchor: str) -> int:
     return LINK_COLUMN_MIN
   if title == '状态':
     return STATUS_COLUMN_MIN
-  if title in ('小红书id', '作者id'):
+  if title in ('小红书id', '作者id', '小红书号'):
     return ID_COLUMN_MIN
   if title in ('平台昵称', '发布日期'):
     return TEXT_COLUMN_MIN

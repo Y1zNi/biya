@@ -35,10 +35,11 @@ BASE_TABLE_COLUMNS: List[TableColumn] = [
   ('状态', 96, 'w'),
 ]
 
-XHS_EXTRA_HEADERS: List[str] = ['小红书id', '作者id', '发布日期']
+XHS_EXTRA_HEADERS: List[str] = ['小红书id', '作者id', '小红书号', '发布日期']
 XHS_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('小红书id', 128, 'w'),
   ('作者id', 128, 'w'),
+  ('小红书号', 128, 'w'),
   ('发布日期', 140, 'center'),
 ]
 
@@ -287,6 +288,7 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.author_name,
       item.note_id,
       item.author_id,
+      item.author_sec_uid,
       item.publish_time,
       item.views,
       item.likes,

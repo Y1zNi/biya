@@ -13,6 +13,7 @@ from infra.collectors.xiaohongshu_parsers import api_client
 from infra.collectors.xiaohongshu_parsers import build_item
 from infra.collectors.xiaohongshu_parsers import extractor
 from infra.collectors.xiaohongshu_parsers import page as xhs_page
+from infra.collectors.xiaohongshu_parsers import profile as xhs_profile
 from infra.collectors.xiaohongshu_parsers.url import NoteUrlInfo, build_explore_url, parse_note_url
 from infra.platform_detect import detect_platform
 
@@ -38,6 +39,7 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
 
   cookies: List[Dict[str, Any]] = await page.context.cookies()
   note: Optional[Dict[str, Any]] = await api_client.fetch_note_by_id(cookies, info)
+  note_page_html: Optional[str] = None
 
   if not note:
     explore_url = build_explore_url(info)
@@ -53,6 +55,7 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
         return item
 
       html = await page.content()
+      note_page_html = html
       note = extractor.extract_note_detail_from_html(info.note_id, html)
       item.link = page.url or explore_url
     except Exception as exc:
@@ -72,4 +75,14 @@ async def collect_one_on_page(page: Page, link: str) -> CollectResultItem:
   if item.link and item.link != link:
     built.link = item.link
 
-  return build_item.finalize_item(built)
+  built = build_item.finalize_item(built)
+  if built.status == CollectRowStatus.SUCCESS:
+    red_id = await xhs_profile.fetch_author_red_id(
+      page,
+      info,
+      built.author_id,
+      note_page_html=note_page_html,
+    )
+    if red_id:
+      built.author_sec_uid = red_id
+  return built
