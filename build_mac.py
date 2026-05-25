@@ -25,6 +25,18 @@ NODE_DOWNLOAD_URL = f'https://nodejs.org/dist/v{NODE_VERSION}/{NODE_TAR}'
 APP_DIR = ROOT / 'dist' / f'{APP_NAME}.app'
 RELEASE_DIR = ROOT / 'release'
 RELEASE_ZIP = RELEASE_DIR / f'{APP_NAME}-mac-arm64.zip'
+VENV_DIR = ROOT / '.venv'
+VENV_PYTHON = VENV_DIR / 'bin' / 'python'
+
+
+def ensure_build_venv() -> None:
+  """Homebrew Python (PEP 668) 不允许全局 pip，构建依赖装进 .venv。"""
+  if Path(sys.executable).resolve() == VENV_PYTHON.resolve():
+    return
+  if not VENV_PYTHON.is_file():
+    print(f'=== Creating build venv: {VENV_DIR} ===')
+    run([sys.executable, '-m', 'venv', str(VENV_DIR)])
+  os.execv(str(VENV_PYTHON), [str(VENV_PYTHON), *sys.argv])
 
 
 def run(cmd: list[str], **kwargs) -> None:
@@ -186,6 +198,7 @@ def main() -> None:
   if sys.platform != 'darwin':
     raise SystemExit('build_mac.py must run on macOS (Apple Silicon recommended).')
 
+  ensure_build_venv()
   os.chdir(ROOT)
   print('=== Installing dependencies ===')
   ensure_dependencies()
