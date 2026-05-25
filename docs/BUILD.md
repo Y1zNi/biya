@@ -16,7 +16,9 @@
 4. PyInstaller 输出 `.app` → `dist/SocialMediaTool.app`
 5. 打 zip + 生成 `README-mac.txt` → `release/SocialMediaTool-mac-arm64.zip`
 
-CI 构建：在 GitHub 仓库 **Actions** 页手动运行 **Build macOS arm64**，或 push `v*` 标签时自动触发。产物在 workflow artifact 中下载。
+CI 构建：push 到 `master` 会自动触发 Mac 打包；也可在 GitHub **Actions** 页手动运行 **Build macOS arm64**，或 push `v*` 标签时触发。产物在 workflow artifact 中下载。
+
+**首次使用前**需在仓库 **Settings → Actions → General** 开启 Actions，并选择 **Allow all actions and reusable workflows**，保存后 workflow 才会出现在左侧列表。
 
 设置环境变量 `CODESIGN_APP=1` 时，`build_mac.py` 会对 `.app` 做 ad-hoc 签名（CI 默认开启），减轻 Gatekeeper 拦截。
 

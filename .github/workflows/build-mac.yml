@@ -3,8 +3,17 @@ name: Build macOS arm64
 on:
   workflow_dispatch:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
+
+concurrency:
+  group: build-mac-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 jobs:
   build-mac:
