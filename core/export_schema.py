@@ -63,23 +63,12 @@ DOUYIN_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
   ('发布日期', 140, 'center'),
 ]
 
-# KUAISHOU_EXTRA_HEADERS: List[str] = ['作品id', '作者uid', '快手号', '发布日期']
 KUAISHOU_EXTRA_HEADERS: List[str] = [
-  # '作品id',
-  '作者uid',
-  # '快手号',
+  '快手号',
   '发布日期',
 ]
-# KUAISHOU_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
-#   ('作品id', 128, 'w'),
-#   ('作者uid', 128, 'w'),
-#   ('快手号', 128, 'w'),
-#   ('发布日期', 140, 'center'),
-# ]
 KUAISHOU_EXTRA_TABLE_COLUMNS: List[TableColumn] = [
-  # ('作品id', 128, 'w'),
-  ('作者uid', 128, 'w'),
-  # ('快手号', 128, 'w'),
+  ('快手号', 128, 'w'),
   ('发布日期', 140, 'center'),
 ]
 
@@ -346,9 +335,7 @@ def item_to_export_cells(item: CollectResultItem, platform_id: str) -> List[str]
       item.link,
       item.platform_name,
       item.author_name,
-      # item.note_id,
-      item.author_id,
-      # item.author_sec_uid,
+      item.author_sec_uid,
       item.publish_time,
       item.views,
       item.likes,

@@ -141,11 +141,25 @@ def normalize_collect_url(url: str) -> str:
   return text
 
 
+def _is_kuaishou_domain_url(url: str) -> bool:
+  parsed = urlparse(ensure_https(url))
+  host = (parsed.netloc or '').lower()
+  if not host:
+    return False
+  if any(marker in host for marker in SHORT_LINK_HOST_MARKERS):
+    return True
+  if any(marker in host for marker in H5_SHARE_HOST_MARKERS):
+    return True
+  return 'kuaishou.com' in host or 'gifshow.com' in host
+
+
 def resolve_collect_entry_url(link: str) -> str:
-  """采集入口 URL：短链/H5 保持原址，其余尽量规范为 PC 详情页."""
+  """采集入口 URL：快手统一 H5，原链打开；短链/H5 保持原址."""
   text = ensure_https(link)
   if not text:
     return text
   if is_share_short_url(text) or is_h5_share_url(text):
+    return text
+  if _is_kuaishou_domain_url(text):
     return text
   return normalize_collect_url(text)

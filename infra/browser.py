@@ -12,7 +12,7 @@ from infra.database import Account
 
 
 def _collect_viewport_and_ua(platform_id: str) -> Tuple[dict, str]:
-  if platform_id == 'weibo':
+  if platform_id in ('weibo', 'kuaishou'):
     viewport = {'width': 390, 'height': 844}
     user_agent = (
       'Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) '

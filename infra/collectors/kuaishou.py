@@ -123,6 +123,34 @@ def metrics_from_photo_json(photo: dict) -> dict[str, str]:
   return metrics
 
 
+def h5_social_metrics_from_photo(photo: dict) -> dict[str, str]:
+  """H5 INIT_STATE / recommend 作品 JSON 中的收藏、转发（Web 不调用）."""
+  stats = render_data.get_statistics_from_photo(photo)
+  sources: list[dict] = []
+  if stats:
+    sources.append(stats)
+  sources.append(photo)
+
+  def pick_metric(*keys: str) -> str:
+    for source in sources:
+      if not isinstance(source, dict):
+        continue
+      raw = number_format.pick_stat_value(source, *keys)
+      if raw is not None:
+        return number_format.format_metric(raw)
+    return '-'
+
+  return {
+    'favorites': pick_metric('collectCount', 'collect_count'),
+    'shares': pick_metric(
+      'shareCount',
+      'share_count',
+      'forwardCount',
+      'forward_count',
+    ),
+  }
+
+
 async def read_author_from_page_json(
   page: Page,
   photo_id: Optional[str],
@@ -485,9 +513,13 @@ async def _resolve_h5_photo_id_after_navigation(
     return kuaishou_url.extract_photo_id(redirected) or ''
 
   state = await h5_state.read_init_state(page)
-  photo = h5_state.find_photo_in_state(state, None)
-  if photo:
-    return h5_state.share_info_photo_id(photo) or render_data.get_photo_id_from_detail(photo)
+  block = h5_state.find_work_block_in_state(state, None)
+  if block:
+    photo = block.get('photo') or {}
+    return (
+      h5_state.share_info_photo_id(photo)
+      or render_data.get_photo_id_from_detail(photo)
+    )
 
   return ''
 
@@ -536,6 +568,25 @@ async def _try_h5_photo_api_fallback(
     return None
 
 
+def _apply_h5_work_block_fields(
+  item: CollectResultItem,
+  fields: dict[str, str],
+) -> None:
+  author_name = fields.get('author_name') or ''
+  if is_plausible_author(author_name):
+    item.author_name = author_name
+
+  item.publish_time = fields.get('publish_time') or '0'
+  item.views = fields.get('views') or '0'
+  item.likes = fields.get('likes') or '0'
+  item.comments = fields.get('comments') or '0'
+  item.shares = fields.get('shares') or '0'
+  item.favorites = fields.get('favorites') or '0'
+  item.media_type = fields.get('media_type') or map_photo_type(item.link)
+  item.author_sec_uid = fields.get('author_sec_uid') or '0'
+  item.author_id = fields.get('author_id') or '0'
+
+
 async def _collect_h5_on_page(
   page: Page,
   item: CollectResultItem,
@@ -562,94 +613,12 @@ async def _collect_h5_on_page(
     item.error_msg = '链接未跳转到快手页面'
     return item
 
-  photo = await h5_state.find_photo_on_h5_page(page, target_photo_id)
-  if not photo:
-    photo = await _try_h5_photo_api_fallback(page, target_photo_id)
-
-  author_name = ''
-  publish_time = '-'
-  metrics: dict[str, str] = {}
-
-  if photo:
-    author_name = h5_state.photo_author_name(photo)
-    if is_plausible_author(author_name):
-      item.author_name = author_name
-    publish_time = kuaishou_time.format_publish_time(photo.get('timestamp'))
-    metrics = metrics_from_photo_json(photo)
-    _assign_photo_ids(
-      item,
-      photo,
-      target_photo_id=target_photo_id,
-      page_url=final_url,
-    )
-    await _fill_kwai_id_from_profile(
-      page.context.request,
-      item,
-      photo,
-      final_url,
-    )
-    await _fill_h5_author_id_gaps(
-      page,
-      item,
-      photo,
-      target_photo_id=target_photo_id,
-      final_url=final_url,
-    )
+  work_block = await h5_state.find_work_block_on_h5_page(page, target_photo_id)
+  if work_block:
+    fields = h5_state.build_collect_fields_from_work_block(work_block, final_url)
+    _apply_h5_work_block_fields(item, fields)
   else:
-    item.error_msg = '未能从 H5 页面读取作品数据（INIT_STATE）'
-    _assign_photo_ids(item, None, target_photo_id=target_photo_id, page_url=final_url)
-    await _fill_h5_author_id_gaps(
-      page,
-      item,
-      None,
-      target_photo_id=target_photo_id,
-      final_url=final_url,
-    )
-
-  if not is_plausible_author(item.author_name):
-    dom_author = await kuaishou_page.read_h5_dom_author(page)
-    if is_plausible_author(dom_author):
-      item.author_name = dom_author
-    else:
-      item.author_name = '-'
-
-  if publish_time in ('-', ''):
-    item.publish_time = '-'
-  else:
-    item.publish_time = publish_time
-
-  dom_metrics = _format_metric_map(await kuaishou_page.read_dom_metrics(page))
-  for key, selector in H5_DOM_METRIC_SELECTORS.items():
-    if dom_metrics.get(key):
-      continue
-    try:
-      loc = page.locator(selector).first
-      if await loc.is_visible(timeout=1500):
-        text = (await loc.inner_text()).strip()
-        formatted = number_format.format_metric(text)
-        if formatted not in ('',):
-          dom_metrics[key] = formatted
-    except Exception:
-      continue
-
-  merged = merge_metrics(dom_metrics, metrics)
-  item.views = merged.get('views') or metrics.get('views') or '0'
-  item.likes = merged.get('likes') or metrics.get('likes') or '0'
-
-  if metrics.get('comments'):
-    item.comments = metrics['comments']
-  else:
-    comment_count = await api_client.fetch_comment_count(
-      page.context.request,
-      target_photo_id,
-      final_url,
-    )
-    item.comments = number_format.format_metric(comment_count)
-
-  if photo:
-    item.media_type = h5_state.map_h5_media_type(photo, final_url)
-  else:
-    item.media_type = map_photo_type(final_url)
+    item.error_msg = '未能从 INIT_STATE 读取作品数据'
 
   item = finalize_item(item)
 
@@ -780,37 +749,25 @@ async def collect_one_on_page(
 ) -> CollectResultItem:
   platform = detect_platform(link)
   preset_photo_id = kuaishou_url.extract_photo_id(link)
-  is_short_link = kuaishou_url.is_share_short_url(link)
-  use_h5_entry = kuaishou_url.should_use_h5_collect(link)
 
   item = CollectResultItem(
     link=link,
     platform_id=platform.platform_id,
     platform_name=platform.platform_name,
-    favorites='-',
-    shares='-',
+    views='0',
+    likes='0',
+    comments='0',
+    favorites='0',
+    shares='0',
     status=CollectRowStatus.FAILED,
   )
-
-  if not preset_photo_id and not is_short_link and not use_h5_entry:
-    item.error_msg = '无法解析快手作品 ID'
-    return item
 
   try:
     await _goto_collect_page(page, link)
     final_url = page.url
     item.link = final_url
 
-    if kuaishou_url.should_use_h5_collect(link, final_url):
-      return await _collect_h5_on_page(
-        page,
-        item,
-        link=link,
-        final_url=final_url,
-        preset_photo_id=preset_photo_id,
-      )
-
-    return await _collect_web_on_page(
+    return await _collect_h5_on_page(
       page,
       item,
       link=link,
