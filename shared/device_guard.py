@@ -26,7 +26,14 @@ def is_frozen() -> bool:
 
 
 def get_exe_dir() -> Path:
-  return Path(sys.executable).resolve().parent
+  exe_path = Path(sys.executable).resolve()
+  if is_frozen() and sys.platform == 'darwin':
+    macos_dir = exe_path.parent
+    contents_dir = macos_dir.parent
+    app_bundle = contents_dir.parent
+    if macos_dir.name == 'MacOS' and contents_dir.name == 'Contents' and app_bundle.suffix == '.app':
+      return app_bundle.parent
+  return exe_path.parent
 
 
 def normalize_mac(text: str) -> str:
@@ -86,8 +93,39 @@ def _macs_from_getmac() -> set[str]:
   return macs
 
 
+def _macs_from_ifconfig() -> set[str]:
+  try:
+    completed = subprocess.run(
+      ['ifconfig'],
+      capture_output=True,
+      text=True,
+      encoding='utf-8',
+      errors='ignore',
+      timeout=5,
+      check=False,
+    )
+  except (OSError, subprocess.SubprocessError):
+    return set()
+
+  if completed.returncode != 0:
+    return set()
+
+  macs: set[str] = set()
+  for line in (completed.stdout or '').splitlines():
+    stripped = line.strip()
+    if not stripped.startswith('ether '):
+      continue
+    normalized = normalize_mac(stripped.split('ether ', 1)[1].split()[0])
+    if normalized:
+      macs.add(normalized)
+  return macs
+
+
 def collect_local_macs() -> set[str]:
-  macs = _macs_from_getmac()
+  if sys.platform == 'darwin':
+    macs = _macs_from_ifconfig()
+  else:
+    macs = _macs_from_getmac()
   if macs:
     return macs
   fallback = _mac_from_uuid_node()

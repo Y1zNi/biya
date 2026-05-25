@@ -13,6 +13,7 @@ from shared.device_guard import (
   DEV_KEY_FILENAME,
   DEV_KEY_VALUE,
   collect_local_macs,
+  get_exe_dir,
   has_dev_key,
   is_device_allowed,
   normalize_mac,
@@ -73,6 +74,28 @@ class TestCollectLocalMacs(unittest.TestCase):
     self.assertIsInstance(macs, set)
     for mac in macs:
       self.assertEqual(normalize_mac(mac), mac)
+
+
+class TestGetExeDir(unittest.TestCase):
+  def test_darwin_app_bundle_parent(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      base = Path(tmp)
+      exe_path = base / 'SocialMediaTool.app' / 'Contents' / 'MacOS' / 'SocialMediaTool'
+      exe_path.parent.mkdir(parents=True, exist_ok=True)
+      exe_path.touch()
+      with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, 'platform', 'darwin'):
+          with patch.object(sys, 'executable', str(exe_path)):
+            self.assertEqual(get_exe_dir().resolve(), base.resolve())
+
+  def test_windows_exe_parent(self):
+    with tempfile.TemporaryDirectory() as tmp:
+      exe_path = Path(tmp) / 'SocialMediaTool.exe'
+      exe_path.touch()
+      with patch.object(sys, 'frozen', True, create=True):
+        with patch.object(sys, 'platform', 'win32'):
+          with patch.object(sys, 'executable', str(exe_path)):
+            self.assertEqual(get_exe_dir().resolve(), exe_path.parent.resolve())
 
 
 if __name__ == '__main__':

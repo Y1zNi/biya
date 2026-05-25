@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
 
 APP_NAME = 'SocialMediaTool'
@@ -10,7 +11,14 @@ APP_VERSION = '1.0.0'
 WINDOW_TITLE = f'Social Media Collector v{APP_VERSION}'
 WINDOW_SIZE = '1200x700'
 
-APP_DATA_DIR = Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming')) / APP_NAME
+
+def get_app_data_dir() -> Path:
+  if sys.platform == 'darwin':
+    return Path.home() / 'Library' / 'Application Support' / APP_NAME
+  return Path(os.environ.get('APPDATA', Path.home() / 'AppData' / 'Roaming')) / APP_NAME
+
+
+APP_DATA_DIR = get_app_data_dir()
 DB_FILE = APP_DATA_DIR / 'data.db'
 STATES_DIR = APP_DATA_DIR / 'states'
 TEMP_DIR = APP_DATA_DIR / 'temp'

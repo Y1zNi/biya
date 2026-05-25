@@ -35,15 +35,24 @@ def get_sign_cli_path() -> Path:
   return get_sign_libs_dir() / 'sign_cli.js'
 
 
+def _node_binary_name() -> str:
+  return 'node.exe' if sys.platform == 'win32' else 'node'
+
+
+def _bundled_node_path(base: Path) -> Path:
+  return base / 'node' / _node_binary_name()
+
+
 def resolve_node_executable() -> Path:
+  node_name = _node_binary_name()
   if is_frozen():
     meipass = get_meipass()
     if meipass:
-      bundled = meipass / 'node' / 'node.exe'
+      bundled = _bundled_node_path(meipass)
       if bundled.is_file():
         return bundled
 
-  bundled_dev = _PROJECT_ROOT / '_bundle' / 'node' / 'node.exe'
+  bundled_dev = _PROJECT_ROOT / '_bundle' / 'node' / node_name
   if bundled_dev.is_file():
     return bundled_dev
 
@@ -51,7 +60,8 @@ def resolve_node_executable() -> Path:
   if which:
     return Path(which)
 
+  build_hint = 'python build.py' if sys.platform == 'win32' else 'python build_mac.py'
   raise FileNotFoundError(
-    '未找到 Node 运行时。请先执行 python build.py 打包 Node，'
+    f'未找到 Node 运行时。请先执行 {build_hint} 打包 Node，'
     '或在开发机安装 Node.js 并加入 PATH。',
   )

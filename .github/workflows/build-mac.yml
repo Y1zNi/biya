@@ -1,0 +1,30 @@
+name: Build macOS arm64
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-mac:
+    runs-on: macos-14
+    env:
+      CODESIGN_APP: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build .app bundle
+        run: python build_mac.py
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SocialMediaTool-mac-arm64
+          path: release/SocialMediaTool-mac-arm64.zip
