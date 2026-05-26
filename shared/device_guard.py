@@ -12,6 +12,7 @@ from pathlib import Path
 ALLOWED_MACS: frozenset[str] = frozenset({
   '62:74:b1:17:93:44',
   '70:ae:d5:53:7f:e0',
+  'a8:41:f4:ab:94:86',
   'fc:b2:14:40:ea:1a',
 })
 
