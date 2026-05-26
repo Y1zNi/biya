@@ -9,6 +9,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 from playwright.async_api import Browser, BrowserContext, async_playwright
 
+from core.export_schema import normalize_platform_id
 from core.models import (
   CollectParams,
   CollectProgress,
@@ -16,6 +17,7 @@ from core.models import (
   CollectRowStatus,
   CollectSummary,
 )
+from core.result_store import item_to_json
 from core.platforms import can_collect, requires_collect_account
 from infra.browser import (
   get_or_create_anonymous_collect_context,
@@ -327,6 +329,11 @@ class CollectService:
     item: CollectResultItem,
     on_row: Optional[OnRow],
   ) -> None:
+    platform_id = normalize_platform_id(
+      item.platform_id or detect_platform(item.link).platform_id,
+    )
+    if not item.platform_id:
+      item.platform_id = platform_id
     self.db.add_collect_result(
       task_id=task_id,
       link=item.link,
@@ -345,6 +352,8 @@ class CollectService:
       media_type=item.media_type,
       status=item.status.value,
       error_msg=item.error_msg,
+      platform_id=platform_id,
+      payload_json=item_to_json(item),
     )
     if on_row is not None:
       on_row(item)

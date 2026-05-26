@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 from tkinter import filedialog, messagebox
 from typing import Callable, Dict, List, Optional, Set, Tuple
 
 import customtkinter as ctk
 
-from config import COLLECT_PAGE_TIMEOUT_MAX_SEC, COLLECT_PAGE_TIMEOUT_MIN_SEC, EXPORT_DIR
+from config import (
+  COLLECT_PAGE_TIMEOUT_MAX_SEC,
+  COLLECT_PAGE_TIMEOUT_MIN_SEC,
+  EXPORT_DIR,
+  EXPORT_WARN_ROW_COUNT,
+  UI_RESTORE_RENDER_LIMIT,
+)
 from core.export_schema import normalize_platform_id
+from core.result_store import item_from_db_row
 from core.models import (
   CollectParams,
   CollectProgress,
@@ -24,8 +32,8 @@ from core.platforms import (
 )
 from infra.database import ACCOUNT_STATUS_EXPIRED, Account, Database
 from infra.excel import (
-  export_all_platform_results,
-  export_platform_results,
+  export_all_platform_results_from_db,
+  export_platform_results_from_db,
   extract_first_column_links_with_rows,
   extract_links_from_text,
   filter_links_by_row_range,
@@ -33,7 +41,7 @@ from infra.excel import (
 from infra.platform_detect import detect_platform
 from ui.layout import add_horizontal_divider
 from services.collect import CollectService
-from shared.async_runner import run_coro_in_thread
+from shared.async_runner import run_coro_in_thread, run_in_thread
 from ui.widgets import LAYOUT_DEBOUNCE_MS, CollectResultGrid
 from ui.theme import (
   BTN_HEIGHT,
@@ -114,6 +122,10 @@ class CollectPanel(ctk.CTkFrame):
     self._module_panels: Dict[str, ctk.CTkFrame] = {}
     self._panel_layout_after_id: Optional[str] = None
     self.is_collecting = False
+    self.is_exporting = False
+    self._latest_task_id: Optional[int] = None
+    self.pick_excel_btn: Optional[ctk.CTkButton] = None
+    self._param_entries: List[ctk.CTkEntry] = []
     self._progress_total = 0
     self._progress_current = 0
     self._progress_success = 0
@@ -121,6 +133,7 @@ class CollectPanel(ctk.CTkFrame):
     self._progress_unsupported = 0
 
     self._build_ui()
+    self._restore_session_from_db()
 
   def _build_result_tabs(self) -> None:
     if hasattr(self, 'result_content'):
@@ -262,9 +275,102 @@ class CollectPanel(ctk.CTkFrame):
     self._show_platform_tab(platform_id)
 
   def _set_export_buttons_state(self, enabled: bool) -> None:
+    if self.is_collecting or self.is_exporting:
+      enabled = False
     state = 'normal' if enabled else 'disabled'
     self.export_current_btn.configure(state=state)
     self.export_all_btn.configure(state=state)
+
+  def _set_input_locked(self, locked: bool) -> None:
+    """采集中/导出中锁定参数与输入；模块 Tab、平台 Tab 不锁."""
+    entry_state = 'disabled' if locked else 'normal'
+    for entry in self._param_entries:
+      entry.configure(state=entry_state)
+    if self.pick_excel_btn is not None:
+      self.pick_excel_btn.configure(state=entry_state)
+    if locked:
+      self.link_textbox.configure(state='disabled')
+    else:
+      self.link_textbox.configure(state='normal')
+      if self._link_textbox_placeholder_active:
+        self._show_link_textbox_placeholder()
+
+  def _refresh_workflow_buttons(self) -> None:
+    busy = self.is_collecting or self.is_exporting
+    if busy:
+      self.start_btn.configure(state='disabled')
+    else:
+      self.start_btn.configure(state='normal')
+    if self.is_collecting:
+      self.stop_btn.configure(state='normal')
+    else:
+      self.stop_btn.configure(state='disabled')
+    can_export = (
+      not busy
+      and self._latest_task_id is not None
+      and self.db.count_results_with_payload(self._latest_task_id) > 0
+    )
+    self._set_export_buttons_state(can_export)
+    self._set_input_locked(busy)
+
+  def _get_latest_task_id(self) -> Optional[int]:
+    if self._latest_task_id is not None:
+      return self._latest_task_id
+    task = self.db.get_latest_task()
+    if task is None:
+      return None
+    self._latest_task_id = task.id
+    return task.id
+
+  def _restore_session_from_db(self) -> None:
+    task = self.db.get_latest_task()
+    if task is None:
+      return
+    self._latest_task_id = task.id
+    total_payload = self.db.count_results_with_payload(task.id)
+    if total_payload <= 0:
+      return
+
+    items_by_platform: Dict[str, List[CollectResultItem]] = {
+      pid: [] for pid in self._tab_platform_ids
+    }
+    for db_row in self.db.iter_collect_results(task.id):
+      item = item_from_db_row(db_row)
+      if item is None:
+        continue
+      platform_id = self._resolve_platform_id(item)
+      if platform_id not in items_by_platform:
+        items_by_platform[platform_id] = []
+      items_by_platform[platform_id].append(item)
+
+    for platform_id in self._tab_platform_ids:
+      items = items_by_platform.get(platform_id, [])
+      self.results_by_platform[platform_id] = items
+      grid = self.result_grids.get(platform_id)
+      if grid is None:
+        continue
+      grid.clear()
+      if not items:
+        continue
+      render_items = items
+      if len(items) > UI_RESTORE_RENDER_LIMIT:
+        render_items = items[-UI_RESTORE_RENDER_LIMIT:]
+      for index, item in enumerate(render_items, start=1):
+        grid.add_row(item, index)
+      if len(items) > len(render_items):
+        grid.set_total_display(len(items), len(render_items))
+
+    self._progress_total = task.total
+    self._progress_current = total_payload
+    self._progress_success = 0
+    self._progress_failed = 0
+    self._progress_unsupported = 0
+    for items in items_by_platform.values():
+      for item in items:
+        self._record_result_status(item.status)
+    self._refresh_progress_display()
+    self._refresh_workflow_buttons()
+    self.on_status(f'已恢复上次采集 {total_payload} 条，可直接导出')
 
   def _add_param_field(
     self,
@@ -285,6 +391,7 @@ class CollectPanel(ctk.CTkFrame):
     entry = ctk.CTkEntry(wrap, width=width, height=BTN_HEIGHT - 4)
     entry.pack(side='left')
     entry.insert(0, default)
+    self._param_entries.append(entry)
     return entry
 
   def _set_active_module_button(self, module_id: str) -> None:
@@ -462,7 +569,7 @@ class CollectPanel(ctk.CTkFrame):
       text_color=COLOR_TEXT,
     ).pack(side='left', padx=(0, 8))
 
-    ctk.CTkButton(
+    self.pick_excel_btn = ctk.CTkButton(
       excel_row,
       text='选择 Excel',
       width=118,
@@ -475,7 +582,8 @@ class CollectPanel(ctk.CTkFrame):
       text_color=COLOR_ACCENT,
       font=font_body(weight='bold'),
       command=self._on_pick_excel,
-    ).pack(side='left', padx=(0, 12))
+    )
+    self.pick_excel_btn.pack(side='left', padx=(0, 12))
 
     self.link_textbox = ctk.CTkTextbox(
       excel_row,
@@ -807,9 +915,8 @@ class CollectPanel(ctk.CTkFrame):
     self._clear_all_results()
 
     self.is_collecting = True
-    self.start_btn.configure(state='disabled')
-    self.stop_btn.configure(state='normal')
-    self._set_export_buttons_state(False)
+    self._latest_task_id = None
+    self._refresh_workflow_buttons()
     self._reset_progress_counters(len(links))
     self._refresh_progress_display()
     self.on_status(f'开始采集，共 {len(links)} 条链接')
@@ -868,10 +975,9 @@ class CollectPanel(ctk.CTkFrame):
 
   def _on_collect_finished(self, summary: CollectSummary) -> None:
     self.is_collecting = False
-    self.start_btn.configure(state='normal')
-    self.stop_btn.configure(state='disabled')
-    if self._has_any_results():
-      self._set_export_buttons_state(True)
+    if summary.task_id is not None:
+      self._latest_task_id = summary.task_id
+    self._refresh_workflow_buttons()
 
     if summary.expired_account_ids:
       for account_id in summary.expired_account_ids:
@@ -889,15 +995,20 @@ class CollectPanel(ctk.CTkFrame):
 
   def _on_collect_error(self, exc: Exception) -> None:
     self.is_collecting = False
-    self.start_btn.configure(state='normal')
-    self.stop_btn.configure(state='disabled')
+    self._refresh_workflow_buttons()
     messagebox.showerror('采集失败', str(exc))
     self.on_status(f'采集失败：{exc}')
 
   def _on_export_current(self) -> None:
+    if self.is_collecting or self.is_exporting:
+      return
     platform_id = self._get_current_tab_platform_id()
-    items = self.results_by_platform.get(platform_id, [])
-    if not items:
+    task_id = self._get_latest_task_id()
+    if task_id is None:
+      messagebox.showwarning('提示', '没有可导出的采集批次')
+      return
+    row_count = self.db.count_exportable_results(task_id, platform_id)
+    if row_count <= 0:
       messagebox.showwarning('提示', f'当前「{_tab_label(platform_id)}」Tab 没有可导出的数据')
       return
 
@@ -912,18 +1023,30 @@ class CollectPanel(ctk.CTkFrame):
     )
     if not save_path:
       return
-
-    try:
-      path = export_platform_results(items, platform_id, save_path)
-      messagebox.showinfo('导出成功', f'已保存到：\n{path}')
-      self.on_status(f'已导出{_tab_label(platform_id)}：{path.name}')
-    except Exception as exc:
-      messagebox.showerror('导出失败', str(exc))
+    self._run_export_in_background(
+      lambda: export_platform_results_from_db(self.db, task_id, platform_id, save_path),
+      success_title='导出成功',
+      success_detail=f'已保存到：\n{save_path}',
+      status_ok=f'已导出{_tab_label(platform_id)}：{Path(save_path).name}',
+    )
 
   def _on_export_all(self) -> None:
-    if not self._has_any_results():
+    if self.is_collecting or self.is_exporting:
+      return
+    task_id = self._get_latest_task_id()
+    if task_id is None:
+      messagebox.showwarning('提示', '没有可导出的采集批次')
+      return
+    row_count = self.db.count_exportable_results(task_id)
+    if row_count <= 0:
       messagebox.showwarning('提示', '没有可导出的数据')
       return
+    if row_count >= EXPORT_WARN_ROW_COUNT:
+      if not messagebox.askyesno(
+        '数据量较大',
+        f'当前共 {row_count} 条，导出可能需要一些时间。\n建议可先分平台导出。\n\n是否继续导出全部？',
+      ):
+        return
 
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     default_name = f'采集结果_全部_{timestamp}.xlsx'
@@ -936,10 +1059,41 @@ class CollectPanel(ctk.CTkFrame):
     )
     if not save_path:
       return
+    self._run_export_in_background(
+      lambda: export_all_platform_results_from_db(self.db, task_id, save_path),
+      success_title='导出成功',
+      success_detail=f'已保存到：\n{save_path}\n（各平台独立 Sheet）',
+      status_ok=f'已导出全部平台：{Path(save_path).name}',
+    )
 
-    try:
-      path = export_all_platform_results(self.results_by_platform, save_path)
-      messagebox.showinfo('导出成功', f'已保存到：\n{path}\n（各平台独立 Sheet）')
-      self.on_status(f'已导出全部平台：{path.name}')
-    except Exception as exc:
-      messagebox.showerror('导出失败', str(exc))
+  def _run_export_in_background(
+    self,
+    export_fn: Callable[[], Path],
+    *,
+    success_title: str,
+    success_detail: str,
+    status_ok: str,
+  ) -> None:
+    self.is_exporting = True
+    self._refresh_workflow_buttons()
+    self.on_status('正在导出，请稍候...')
+
+    def on_complete(path: Path) -> None:
+      def handle_ok() -> None:
+        self.is_exporting = False
+        self._refresh_workflow_buttons()
+        messagebox.showinfo(success_title, success_detail)
+        self.on_status(status_ok)
+
+      self.after(0, handle_ok)
+
+    def on_error(exc: Exception) -> None:
+      def handle_err() -> None:
+        self.is_exporting = False
+        self._refresh_workflow_buttons()
+        messagebox.showerror('导出失败', str(exc))
+        self.on_status(f'导出失败：{exc}')
+
+      self.after(0, handle_err)
+
+    run_in_thread(export_fn, on_complete, on_error)

@@ -7,6 +7,7 @@ import threading
 from typing import Awaitable, Callable, TypeVar
 
 T = TypeVar('T')
+R = TypeVar('R')
 
 
 def run_coro_in_thread(
@@ -24,6 +25,22 @@ def run_coro_in_thread(
       on_error(exc)
     finally:
       loop.close()
+
+  thread = threading.Thread(target=_target, daemon=True)
+  thread.start()
+
+
+def run_in_thread(
+  fn: Callable[[], R],
+  on_complete: Callable[[R], None],
+  on_error: Callable[[Exception], None],
+) -> None:
+  def _target() -> None:
+    try:
+      result = fn()
+      on_complete(result)
+    except Exception as exc:
+      on_error(exc)
 
   thread = threading.Thread(target=_target, daemon=True)
   thread.start()

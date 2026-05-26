@@ -4,16 +4,20 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, TYPE_CHECKING
 
 from openpyxl import Workbook, load_workbook
 
-from config import EXPORT_DIR
+from config import EXPORT_DB_BATCH_SIZE, EXPORT_DIR
 from core.export_schema import get_export_headers, get_sheet_name, item_to_export_cells, normalize_platform_id
 from core.platforms import list_collectable_platform_ids
 from core.models import CollectResultItem, ExcelSheetData
+from core.result_store import item_from_db_row
 from infra.link_extract import extract_collect_links_from_cell
 from infra.platform_detect import guess_link_column_index, looks_like_collect_link
+
+if TYPE_CHECKING:
+  from infra.database import Database
 
 
 def read_excel_sheet(file_path: str) -> ExcelSheetData:
@@ -100,6 +104,70 @@ def auto_detect_link_column(headers: List[str]) -> int:
   return 0 if headers else -1
 
 
+def export_platform_results_from_db(
+  db: 'Database',
+  task_id: int,
+  platform_id: str,
+  file_path: Optional[str] = None,
+  *,
+  batch_size: int = EXPORT_DB_BATCH_SIZE,
+) -> Path:
+  pid = normalize_platform_id(platform_id)
+  EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+  if not file_path:
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    file_path = str(EXPORT_DIR / f'采集结果_{get_sheet_name(pid)}_{timestamp}.xlsx')
+
+  workbook = Workbook(write_only=True)
+  sheet = workbook.create_sheet(title=get_sheet_name(pid)[:31])
+  sheet.append(get_export_headers(pid))
+  for db_row in db.iter_collect_results(task_id, platform_id=pid, batch_size=batch_size):
+    item = item_from_db_row(db_row)
+    if item is None:
+      continue
+    sheet.append(item_to_export_cells(item, pid))
+  workbook.save(file_path)
+  return Path(file_path)
+
+
+def export_all_platform_results_from_db(
+  db: 'Database',
+  task_id: int,
+  file_path: Optional[str] = None,
+  *,
+  batch_size: int = EXPORT_DB_BATCH_SIZE,
+) -> Path:
+  EXPORT_DIR.mkdir(parents=True, exist_ok=True)
+  if not file_path:
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    file_path = str(EXPORT_DIR / f'采集结果_全部_{timestamp}.xlsx')
+
+  counts = db.count_results_by_platform(task_id)
+  workbook = Workbook(write_only=True)
+  has_sheet = False
+  ordered_ids = list_collectable_platform_ids()
+  extra_ids = [pid for pid in counts if pid not in ordered_ids and counts[pid] > 0]
+  for platform_id in [*ordered_ids, *extra_ids]:
+    if counts.get(platform_id, 0) <= 0:
+      continue
+    pid = normalize_platform_id(platform_id)
+    sheet = workbook.create_sheet(title=get_sheet_name(pid)[:31])
+    sheet.append(get_export_headers(pid))
+    for db_row in db.iter_collect_results(task_id, platform_id=pid, batch_size=batch_size):
+      item = item_from_db_row(db_row)
+      if item is None:
+        continue
+      sheet.append(item_to_export_cells(item, pid))
+    has_sheet = True
+
+  if not has_sheet:
+    sheet = workbook.create_sheet(title='采集结果')
+    sheet.append(get_export_headers('douyin'))
+
+  workbook.save(file_path)
+  return Path(file_path)
+
+
 def export_platform_results(
   items: List[CollectResultItem],
   platform_id: str,
@@ -111,11 +179,9 @@ def export_platform_results(
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     file_path = str(EXPORT_DIR / f'采集结果_{get_sheet_name(pid)}_{timestamp}.xlsx')
 
-  workbook = Workbook()
-  sheet = workbook.active
-  sheet.title = get_sheet_name(pid)[:31]
-  headers = get_export_headers(pid)
-  sheet.append(headers)
+  workbook = Workbook(write_only=True)
+  sheet = workbook.create_sheet(title=get_sheet_name(pid)[:31])
+  sheet.append(get_export_headers(pid))
   for item in items:
     sheet.append(item_to_export_cells(item, pid))
   workbook.save(file_path)
@@ -131,9 +197,7 @@ def export_all_platform_results(
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     file_path = str(EXPORT_DIR / f'采集结果_全部_{timestamp}.xlsx')
 
-  workbook = Workbook()
-  workbook.remove(workbook.active)
-
+  workbook = Workbook(write_only=True)
   has_sheet = False
   ordered_ids = list_collectable_platform_ids()
   extra_ids = [pid for pid in results_by_platform if pid not in ordered_ids]
@@ -143,8 +207,7 @@ def export_all_platform_results(
       continue
     pid = normalize_platform_id(platform_id)
     sheet = workbook.create_sheet(title=get_sheet_name(pid)[:31])
-    headers = get_export_headers(pid)
-    sheet.append(headers)
+    sheet.append(get_export_headers(pid))
     for item in items:
       sheet.append(item_to_export_cells(item, pid))
     has_sheet = True

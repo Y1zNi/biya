@@ -43,6 +43,13 @@ COLLECT_PAGE_TIMEOUT_MAX_SEC = 180
 COLLECT_HEADLESS = True
 EXPORT_DIR = APP_DATA_DIR / 'exports'
 
+# 启动恢复时表格最多渲染行数（导出仍含 DB 全部 JSON 行）
+UI_RESTORE_RENDER_LIMIT = 500
+# 「导出全部」超过该行数时弹确认
+EXPORT_WARN_ROW_COUNT = 3000
+# DB 流式读/写 Excel 分批大小
+EXPORT_DB_BATCH_SIZE = 500
+
 # 平台定义（enabled=False 表示开发中）
 PLATFORMS = [
   {'id': 'douyin', 'name': '抖音', 'enabled': True},

@@ -316,6 +316,14 @@ class CollectResultGrid(ctk.CTkFrame):
     count = len(self._row_records)
     self.total_label.configure(text=f'共 {count} 条')
 
+  def set_total_display(self, total_count: int, rendered_count: Optional[int] = None) -> None:
+    if rendered_count is not None and rendered_count < total_count:
+      self.total_label.configure(
+        text=f'共 {total_count} 条（界面显示最近 {rendered_count} 条，导出含全部）',
+      )
+    else:
+      self.total_label.configure(text=f'共 {total_count} 条')
+
   def clear(self) -> None:
     self._row_records.clear()
     self._clear_table_scroll()

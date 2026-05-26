@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Dict, Generator, Iterable, List, Optional, Tuple
+from typing import Dict, Generator, Iterable, Iterator, List, Optional, Tuple
 
 from config import DB_FILE, PLATFORMS, ensure_dirs
 
@@ -43,6 +43,18 @@ class OperationLog:
   platform: Optional[str]
   status: str
   message: str
+  created_at: datetime
+
+
+@dataclass
+class CollectTask:
+  id: int
+  platform: str
+  account_id: int
+  source_file: str
+  total: int
+  success_count: int
+  status: str
   created_at: datetime
 
 
@@ -146,12 +158,21 @@ class Database:
       ('author_sec_uid', "TEXT NOT NULL DEFAULT '-'"),
       ('douyin_id', "TEXT NOT NULL DEFAULT '-'"),
       ('publish_time', "TEXT NOT NULL DEFAULT '-'"),
+      ('platform_id', "TEXT NOT NULL DEFAULT ''"),
+      ('payload_json', "TEXT NOT NULL DEFAULT ''"),
     )
     for name, definition in columns:
       try:
         conn.execute(f'ALTER TABLE collect_results ADD COLUMN {name} {definition}')
       except sqlite3.OperationalError:
         pass
+    try:
+      conn.execute(
+        'CREATE INDEX IF NOT EXISTS idx_collect_results_task_platform '
+        'ON collect_results(task_id, platform_id)'
+      )
+    except sqlite3.OperationalError:
+      pass
 
   def create_account(
     self,
@@ -382,6 +403,8 @@ class Database:
     media_type: str,
     status: str,
     error_msg: str = '',
+    platform_id: str = '',
+    payload_json: str = '',
   ) -> int:
     now = datetime.now().isoformat()
     with self._connect() as conn:
@@ -391,17 +414,112 @@ class Database:
           task_id, link, platform_name, author_name,
           note_id, author_id, author_sec_uid, douyin_id, publish_time,
           views, likes, favorites, comments, shares, media_type,
-          status, error_msg, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          status, error_msg, created_at, platform_id, payload_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
           task_id, link, platform_name, author_name,
           note_id, author_id, author_sec_uid, douyin_id, publish_time,
           views, likes, favorites, comments, shares, media_type,
-          status, error_msg, now,
+          status, error_msg, now, platform_id, payload_json,
         ),
       )
       return int(cursor.lastrowid)
+
+  def get_latest_task(self) -> Optional[CollectTask]:
+    with self._connect() as conn:
+      row = conn.execute(
+        'SELECT * FROM collect_tasks ORDER BY id DESC LIMIT 1',
+      ).fetchone()
+    return self._row_to_collect_task(row) if row else None
+
+  def count_results_with_payload(self, task_id: int) -> int:
+    with self._connect() as conn:
+      row = conn.execute(
+        """
+        SELECT COUNT(*) FROM collect_results
+        WHERE task_id = ? AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+        """,
+        (task_id,),
+      ).fetchone()
+    return int(row[0]) if row else 0
+
+  def count_results_by_platform(self, task_id: int) -> Dict[str, int]:
+    with self._connect() as conn:
+      rows = conn.execute(
+        """
+        SELECT platform_id, COUNT(*) AS cnt FROM collect_results
+        WHERE task_id = ?
+          AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+        GROUP BY platform_id
+        """,
+        (task_id,),
+      ).fetchall()
+    result: Dict[str, int] = {}
+    for row in rows:
+      pid = (row['platform_id'] or '').strip() or 'unknown'
+      result[pid] = int(row['cnt'])
+    return result
+
+  def count_exportable_results(self, task_id: int, platform_id: Optional[str] = None) -> int:
+    with self._connect() as conn:
+      if platform_id:
+        row = conn.execute(
+          """
+          SELECT COUNT(*) FROM collect_results
+          WHERE task_id = ? AND platform_id = ?
+            AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+          """,
+          (task_id, platform_id),
+        ).fetchone()
+      else:
+        row = conn.execute(
+          """
+          SELECT COUNT(*) FROM collect_results
+          WHERE task_id = ?
+            AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+          """,
+          (task_id,),
+        ).fetchone()
+    return int(row[0]) if row else 0
+
+  def iter_collect_results(
+    self,
+    task_id: int,
+    platform_id: Optional[str] = None,
+    batch_size: int = 500,
+  ) -> Iterator[sqlite3.Row]:
+    """按 id 升序分批读取可导出的结果行（含 payload_json）."""
+    last_id = 0
+    while True:
+      with self._connect() as conn:
+        if platform_id:
+          rows = conn.execute(
+            """
+            SELECT * FROM collect_results
+            WHERE task_id = ? AND platform_id = ? AND id > ?
+              AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (task_id, platform_id, last_id, batch_size),
+          ).fetchall()
+        else:
+          rows = conn.execute(
+            """
+            SELECT * FROM collect_results
+            WHERE task_id = ? AND id > ?
+              AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+            ORDER BY id ASC
+            LIMIT ?
+            """,
+            (task_id, last_id, batch_size),
+          ).fetchall()
+      if not rows:
+        break
+      for row in rows:
+        last_id = int(row['id'])
+        yield row
 
   def get_recent_logs(self, limit: int = 50, platform: Optional[str] = None) -> List[OperationLog]:
     with self._connect() as conn:
@@ -436,6 +554,19 @@ class Database:
       state_file_path=row['state_file_path'],
       created_at=_parse_datetime(row['created_at']),
       updated_at=_parse_datetime(row['updated_at']),
+    )
+
+  @staticmethod
+  def _row_to_collect_task(row: sqlite3.Row) -> CollectTask:
+    return CollectTask(
+      id=row['id'],
+      platform=row['platform'],
+      account_id=row['account_id'],
+      source_file=row['source_file'],
+      total=row['total'],
+      success_count=row['success_count'],
+      status=row['status'],
+      created_at=_parse_datetime(row['created_at']),
     )
 
   @staticmethod
