@@ -2,6 +2,7 @@
 """PyInstaller macOS .app bundle build spec."""
 
 import os
+import sysconfig
 from pathlib import Path
 
 EXE_NAME = os.environ.get('PYINSTALLER_EXE_NAME', 'SocialMediaTool')
@@ -30,6 +31,23 @@ hiddenimports = [
 ]
 datas = []
 binaries = []
+
+_stdlib_dynload = Path(sysconfig.get_path('stdlib')) / 'lib-dynload'
+_stdlib_ext_names = (
+  '_struct',
+  '_ctypes',
+  '_datetime',
+  'zlib',
+  'binascii',
+  'math',
+  'cmath',
+  '_pickle',
+  'select',
+  'unicodedata',
+)
+for _ext in _stdlib_ext_names:
+  for _so in _stdlib_dynload.glob(f'{_ext}*.so'):
+    binaries.append((str(_so), '.'))
 
 # ms-playwright 在 build_mac.py 打包完成后复制进 .app，避免 PyInstaller 对 Chromium.app codesign 失败
 
