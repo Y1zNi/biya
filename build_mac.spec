@@ -14,6 +14,15 @@ project_root = Path(SPECPATH)
 hiddenimports = [
   'sqlite3',
   'asyncio',
+  # Homebrew Python 3.12 + PyInstaller 在 macOS 上易漏打 C 扩展，导致启动报 No module named '_struct'
+  '_struct',
+  'struct',
+  'binascii',
+  'cmath',
+  '_datetime',
+  'zlib',
+  '_ctypes',
+  'ctypes',
   'tkinter',
   'tkinter.filedialog',
   'tkinter.messagebox',
