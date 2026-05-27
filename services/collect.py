@@ -340,22 +340,6 @@ class CollectService:
       item.platform_id = platform_id
     self.db.add_collect_result(
       task_id=task_id,
-      link=item.link,
-      platform_name=item.platform_name,
-      author_name=item.author_name,
-      note_id=item.note_id,
-      author_id=item.author_id,
-      author_sec_uid=item.author_sec_uid,
-      douyin_id=item.douyin_id,
-      publish_time=item.publish_time,
-      views=item.views,
-      likes=item.likes,
-      favorites=item.favorites,
-      comments=item.comments,
-      shares=item.shares,
-      media_type=item.media_type,
-      status=item.status.value,
-      error_msg=item.error_msg,
       platform_id=platform_id,
       payload_json=item_to_json(item),
     )

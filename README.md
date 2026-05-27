@@ -49,4 +49,6 @@ python build.py
 
 ## 用户数据路径
 
-账号与导出文件保存在：`%APPDATA%\SocialMediaTool`
+账号与导出文件保存在：`%APPDATA%\SocialMediaTool`（macOS：`~/Library/Application Support/SocialMediaTool`）。
+
+若从旧版升级且采集/导出异常，请**删除整个 SocialMediaTool 数据目录**后重新启动（会新建数据库，需重新登录各平台账号）；仅删除 `data.db` 无法更新表结构。

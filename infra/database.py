@@ -127,52 +127,16 @@ class Database:
         CREATE TABLE IF NOT EXISTS collect_results (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           task_id INTEGER NOT NULL,
-          link TEXT NOT NULL,
-          platform_name TEXT NOT NULL DEFAULT '',
-          author_name TEXT NOT NULL DEFAULT '',
-          note_id TEXT NOT NULL DEFAULT '-',
-          author_id TEXT NOT NULL DEFAULT '-',
-          author_sec_uid TEXT NOT NULL DEFAULT '-',
-          douyin_id TEXT NOT NULL DEFAULT '-',
-          publish_time TEXT NOT NULL DEFAULT '-',
-          views TEXT NOT NULL DEFAULT '-',
-          likes TEXT NOT NULL DEFAULT '-',
-          favorites TEXT NOT NULL DEFAULT '-',
-          comments TEXT NOT NULL DEFAULT '-',
-          shares TEXT NOT NULL DEFAULT '-',
-          media_type TEXT NOT NULL DEFAULT '-',
-          status TEXT NOT NULL DEFAULT '',
-          error_msg TEXT NOT NULL DEFAULT '',
+          platform_id TEXT NOT NULL DEFAULT '',
+          payload_json TEXT NOT NULL DEFAULT '',
           created_at TEXT NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_collect_results_task_id
           ON collect_results(task_id);
+        CREATE INDEX IF NOT EXISTS idx_collect_results_task_platform
+          ON collect_results(task_id, platform_id);
         """
       )
-      self._migrate_collect_results(conn)
-
-  def _migrate_collect_results(self, conn: sqlite3.Connection) -> None:
-    columns = (
-      ('note_id', "TEXT NOT NULL DEFAULT '-'"),
-      ('author_id', "TEXT NOT NULL DEFAULT '-'"),
-      ('author_sec_uid', "TEXT NOT NULL DEFAULT '-'"),
-      ('douyin_id', "TEXT NOT NULL DEFAULT '-'"),
-      ('publish_time', "TEXT NOT NULL DEFAULT '-'"),
-      ('platform_id', "TEXT NOT NULL DEFAULT ''"),
-      ('payload_json', "TEXT NOT NULL DEFAULT ''"),
-    )
-    for name, definition in columns:
-      try:
-        conn.execute(f'ALTER TABLE collect_results ADD COLUMN {name} {definition}')
-      except sqlite3.OperationalError:
-        pass
-    try:
-      conn.execute(
-        'CREATE INDEX IF NOT EXISTS idx_collect_results_task_platform '
-        'ON collect_results(task_id, platform_id)'
-      )
-    except sqlite3.OperationalError:
-      pass
 
   def create_account(
     self,
@@ -387,42 +351,17 @@ class Database:
     self,
     *,
     task_id: int,
-    link: str,
-    platform_name: str,
-    author_name: str,
-    note_id: str = '-',
-    author_id: str = '-',
-    author_sec_uid: str = '-',
-    douyin_id: str = '-',
-    publish_time: str = '-',
-    views: str,
-    likes: str,
-    favorites: str,
-    comments: str,
-    shares: str,
-    media_type: str,
-    status: str,
-    error_msg: str = '',
-    platform_id: str = '',
-    payload_json: str = '',
+    platform_id: str,
+    payload_json: str,
   ) -> int:
     now = datetime.now().isoformat()
     with self._connect() as conn:
       cursor = conn.execute(
         """
-        INSERT INTO collect_results (
-          task_id, link, platform_name, author_name,
-          note_id, author_id, author_sec_uid, douyin_id, publish_time,
-          views, likes, favorites, comments, shares, media_type,
-          status, error_msg, created_at, platform_id, payload_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO collect_results (task_id, platform_id, payload_json, created_at)
+        VALUES (?, ?, ?, ?)
         """,
-        (
-          task_id, link, platform_name, author_name,
-          note_id, author_id, author_sec_uid, douyin_id, publish_time,
-          views, likes, favorites, comments, shares, media_type,
-          status, error_msg, now, platform_id, payload_json,
-        ),
+        (task_id, platform_id, payload_json, now),
       )
       return int(cursor.lastrowid)
 
