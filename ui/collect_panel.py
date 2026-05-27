@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from tkinter import filedialog, messagebox
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Set
 
 import customtkinter as ctk
 
@@ -14,7 +15,7 @@ from config import (
   COLLECT_PAGE_TIMEOUT_MIN_SEC,
   EXPORT_DIR,
   EXPORT_WARN_ROW_COUNT,
-  UI_RESTORE_RENDER_LIMIT,
+  UI_PAGE_SIZE,
 )
 from core.export_schema import normalize_platform_id
 from core.result_store import item_from_db_row
@@ -42,7 +43,7 @@ from infra.platform_detect import detect_platform
 from ui.layout import add_horizontal_divider
 from services.collect import CollectService
 from shared.async_runner import run_coro_in_thread, run_in_thread
-from ui.widgets import LAYOUT_DEBOUNCE_MS, CollectResultGrid
+from ui.widgets import CollectResultGrid, LAYOUT_DEBOUNCE_MS, ResultPagerBar
 from ui.theme import (
   BTN_HEIGHT,
   COLOR_ACCENT,
@@ -92,6 +93,16 @@ LINK_TEXTBOX_PLACEHOLDER = (
   '与 Excel 二选一；有内容时优先使用此处'
 )
 
+PAGE_RELOAD_THROTTLE_MS = 200
+PROGRESS_REFRESH_THROTTLE_MS = 200
+
+
+@dataclass
+class PlatformPageState:
+  page: int = 1
+  pinned_page: bool = False
+  total_count: int = 0
+
 
 class CollectPanel(ctk.CTkFrame):
   """数据采集主面板."""
@@ -110,8 +121,13 @@ class CollectPanel(ctk.CTkFrame):
 
     self.collect_service = CollectService(db)
     self.excel_path: Optional[str] = None
-    self.results_by_platform: Dict[str, List[CollectResultItem]] = {}
     self.result_grids: Dict[str, CollectResultGrid] = {}
+    self.result_pagers: Dict[str, ResultPagerBar] = {}
+    self._page_state: Dict[str, PlatformPageState] = {}
+    self._reload_throttle_after_id: Optional[str] = None
+    self._progress_throttle_after_id: Optional[str] = None
+    self._pending_reload_platform: Optional[str] = None
+    self._pending_force_last_page: bool = False
     self._platform_panels: Dict[str, ctk.CTkFrame] = {}
     self._tab_platform_ids: List[str] = []
     self._tab_labels: List[str] = []
@@ -140,8 +156,9 @@ class CollectPanel(ctk.CTkFrame):
       for child in self.result_content.winfo_children():
         child.destroy()
     self.result_grids.clear()
+    self.result_pagers.clear()
     self._platform_panels.clear()
-    self.results_by_platform.clear()
+    self._page_state.clear()
     self._tab_platform_ids = _collect_tab_platform_ids()
     self._tab_labels = [_tab_label(platform_id) for platform_id in self._tab_platform_ids]
 
@@ -149,12 +166,23 @@ class CollectPanel(ctk.CTkFrame):
       panel = ctk.CTkFrame(self.result_content, fg_color='transparent')
       panel.grid(row=0, column=0, sticky='nsew')
       panel.grid_rowconfigure(0, weight=1)
+      panel.grid_rowconfigure(1, weight=0)
       panel.grid_columnconfigure(0, weight=1)
       grid = CollectResultGrid(panel, platform_id)
       grid.grid(row=0, column=0, sticky='nsew')
+      pager = ResultPagerBar(
+        panel,
+        on_first=lambda pid=platform_id: self._on_pager_first(pid),
+        on_prev=lambda pid=platform_id: self._on_pager_prev(pid),
+        on_next=lambda pid=platform_id: self._on_pager_next(pid),
+        on_last=lambda pid=platform_id: self._on_pager_last(pid),
+        on_jump=lambda pid=platform_id: self._on_pager_jump(pid),
+      )
+      pager.grid(row=1, column=0, sticky='ew', padx=4, pady=(0, 4))
       self._platform_panels[platform_id] = panel
       self.result_grids[platform_id] = grid
-      self.results_by_platform[platform_id] = []
+      self.result_pagers[platform_id] = pager
+      self._page_state[platform_id] = PlatformPageState()
 
     if self._tab_platform_ids:
       self._show_platform_tab(self._tab_platform_ids[0])
@@ -223,21 +251,169 @@ class CollectPanel(ctk.CTkFrame):
         self.result_grids[pid].refresh_layout()
       else:
         panel.grid_remove()
+    if self._get_latest_task_id() is not None:
+      state = self._get_page_state(platform_id)
+      if state.pinned_page:
+        self._load_platform_page(platform_id)
+      else:
+        self._load_platform_page(platform_id, force_last_page=True)
 
   def _clear_all_results(self) -> None:
     for platform_id in self._tab_platform_ids:
-      self.results_by_platform[platform_id] = []
-      if platform_id in self.result_grids:
-        self.result_grids[platform_id].clear()
+      self._page_state[platform_id] = PlatformPageState()
+      grid = self.result_grids.get(platform_id)
+      if grid is not None:
+        grid.clear()
+      pager = self.result_pagers.get(platform_id)
+      if pager is not None:
+        pager.update_display(0, 1, 1)
+        pager.set_page_entry(1)
 
-  def _all_results(self) -> List[CollectResultItem]:
+  def _get_page_state(self, platform_id: str) -> PlatformPageState:
+    if platform_id not in self._page_state:
+      self._page_state[platform_id] = PlatformPageState()
+    return self._page_state[platform_id]
+
+  def _total_pages(self, total: int) -> int:
+    if total <= 0:
+      return 1
+    return (total + UI_PAGE_SIZE - 1) // UI_PAGE_SIZE
+
+  def _load_platform_page(self, platform_id: str, *, force_last_page: bool = False) -> None:
+    task_id = self._get_latest_task_id()
+    grid = self.result_grids.get(platform_id)
+    pager = self.result_pagers.get(platform_id)
+    if task_id is None:
+      if grid is not None:
+        grid.clear()
+      if pager is not None:
+        pager.update_display(0, 1, 1)
+        pager.set_page_entry(1)
+      return
+
+    state = self._get_page_state(platform_id)
+    total = self.db.count_exportable_results(task_id, platform_id)
+    state.total_count = total
+    total_pages = self._total_pages(total)
+
+    if force_last_page:
+      state.pinned_page = False
+      state.page = total_pages
+    else:
+      state.page = max(1, min(state.page, total_pages))
+
+    if total <= 0:
+      if grid is not None:
+        grid.clear()
+      if pager is not None:
+        pager.update_display(0, 1, 1)
+        pager.set_page_entry(1)
+      return
+
+    rows = self.db.list_collect_results_page(
+      task_id,
+      platform_id,
+      state.page,
+      UI_PAGE_SIZE,
+    )
     items: List[CollectResultItem] = []
-    for platform_id in self._tab_platform_ids:
-      items.extend(self.results_by_platform.get(platform_id, []))
-    return items
+    for db_row in rows:
+      item = item_from_db_row(db_row)
+      if item is not None:
+        items.append(item)
 
-  def _has_any_results(self) -> bool:
-    return any(self.results_by_platform.get(pid) for pid in self._tab_platform_ids)
+    offset = (state.page - 1) * UI_PAGE_SIZE
+    if grid is not None:
+      grid.load_page(items, global_offset=offset)
+    if pager is not None:
+      pager.update_display(total, state.page, total_pages)
+      pager.set_page_entry(state.page)
+
+  def _update_pager_summary(self, platform_id: str) -> None:
+    task_id = self._get_latest_task_id()
+    if task_id is None:
+      return
+    state = self._get_page_state(platform_id)
+    total = self.db.count_exportable_results(task_id, platform_id)
+    state.total_count = total
+    total_pages = self._total_pages(total)
+    pager = self.result_pagers.get(platform_id)
+    if pager is not None:
+      pager.update_display(total, state.page, total_pages)
+
+  def _pin_page(self, platform_id: str) -> None:
+    self._get_page_state(platform_id).pinned_page = True
+
+  def _on_pager_first(self, platform_id: str) -> None:
+    self._pin_page(platform_id)
+    self._get_page_state(platform_id).page = 1
+    self._load_platform_page(platform_id)
+
+  def _on_pager_prev(self, platform_id: str) -> None:
+    self._pin_page(platform_id)
+    state = self._get_page_state(platform_id)
+    state.page = max(1, state.page - 1)
+    self._load_platform_page(platform_id)
+
+  def _on_pager_next(self, platform_id: str) -> None:
+    self._pin_page(platform_id)
+    state = self._get_page_state(platform_id)
+    task_id = self._get_latest_task_id()
+    if task_id is None:
+      return
+    total = self.db.count_exportable_results(task_id, platform_id)
+    state.page = min(self._total_pages(total), state.page + 1)
+    self._load_platform_page(platform_id)
+
+  def _on_pager_last(self, platform_id: str) -> None:
+    self._load_platform_page(platform_id, force_last_page=True)
+
+  def _on_pager_jump(self, platform_id: str) -> None:
+    self._pin_page(platform_id)
+    pager = self.result_pagers.get(platform_id)
+    state = self._get_page_state(platform_id)
+    task_id = self._get_latest_task_id()
+    if task_id is None or pager is None:
+      return
+    total = self.db.count_exportable_results(task_id, platform_id)
+    state.page = min(self._total_pages(total), pager.get_page_entry_value())
+    self._load_platform_page(platform_id)
+
+  def _schedule_page_reload(self, platform_id: str, *, force_last_page: bool = False) -> None:
+    self._pending_reload_platform = platform_id
+    self._pending_force_last_page = force_last_page
+    if self._reload_throttle_after_id is not None:
+      return
+    try:
+      self._reload_throttle_after_id = self.after(
+        PAGE_RELOAD_THROTTLE_MS,
+        self._run_throttled_page_reload,
+      )
+    except Exception:
+      self._reload_throttle_after_id = None
+
+  def _run_throttled_page_reload(self) -> None:
+    self._reload_throttle_after_id = None
+    platform_id = self._pending_reload_platform
+    if not platform_id:
+      return
+    self._load_platform_page(platform_id, force_last_page=self._pending_force_last_page)
+    self._refresh_progress_display()
+
+  def _schedule_progress_refresh(self) -> None:
+    if self._progress_throttle_after_id is not None:
+      return
+    try:
+      self._progress_throttle_after_id = self.after(
+        PROGRESS_REFRESH_THROTTLE_MS,
+        self._run_throttled_progress_refresh,
+      )
+    except Exception:
+      self._progress_throttle_after_id = None
+
+  def _run_throttled_progress_refresh(self) -> None:
+    self._progress_throttle_after_id = None
+    self._refresh_progress_display()
 
   def _resolve_platform_id(self, item: CollectResultItem) -> str:
     if item.platform_id:
@@ -331,43 +507,25 @@ class CollectPanel(ctk.CTkFrame):
     if total_payload <= 0:
       return
 
-    items_by_platform: Dict[str, List[CollectResultItem]] = {
-      pid: [] for pid in self._tab_platform_ids
-    }
-    for db_row in self.db.iter_collect_results(task.id):
-      item = item_from_db_row(db_row)
-      if item is None:
-        continue
-      platform_id = self._resolve_platform_id(item)
-      if platform_id not in items_by_platform:
-        items_by_platform[platform_id] = []
-      items_by_platform[platform_id].append(item)
-
-    for platform_id in self._tab_platform_ids:
-      items = items_by_platform.get(platform_id, [])
-      self.results_by_platform[platform_id] = items
-      grid = self.result_grids.get(platform_id)
-      if grid is None:
-        continue
-      grid.clear()
-      if not items:
-        continue
-      render_items = items
-      if len(items) > UI_RESTORE_RENDER_LIMIT:
-        render_items = items[-UI_RESTORE_RENDER_LIMIT:]
-      for index, item in enumerate(render_items, start=1):
-        grid.add_row(item, index)
-      if len(items) > len(render_items):
-        grid.set_total_display(len(items), len(render_items))
-
     self._progress_total = task.total
     self._progress_current = total_payload
     self._progress_success = 0
     self._progress_failed = 0
     self._progress_unsupported = 0
-    for items in items_by_platform.values():
-      for item in items:
+    for db_row in self.db.iter_collect_results(task.id):
+      item = item_from_db_row(db_row)
+      if item is not None:
         self._record_result_status(item.status)
+
+    for platform_id in self._tab_platform_ids:
+      state = self._get_page_state(platform_id)
+      state.pinned_page = False
+      state.page = 1
+
+    active = self._get_current_tab_platform_id()
+    if active:
+      self._load_platform_page(active, force_last_page=True)
+
     self._refresh_progress_display()
     self._refresh_workflow_buttons()
     self.on_status(f'已恢复上次采集 {total_payload} 条，可直接导出')
@@ -935,6 +1093,9 @@ class CollectPanel(ctk.CTkFrame):
     def on_row(item: CollectResultItem) -> None:
       self.after(0, lambda: self._append_result_row(item))
 
+    def on_task_started(task_id: int) -> None:
+      self.after(0, lambda: self._on_task_started(task_id))
+
     def on_complete(summary: CollectSummary) -> None:
       self.after(0, lambda: self._on_collect_finished(summary))
 
@@ -949,6 +1110,7 @@ class CollectPanel(ctk.CTkFrame):
         params,
         on_progress=on_progress,
         on_row=on_row,
+        on_task_started=on_task_started,
       ),
       on_complete,
       on_error,
@@ -958,26 +1120,41 @@ class CollectPanel(ctk.CTkFrame):
     self.collect_service.cancel()
     self.on_status('正在停止采集...')
 
+  def _on_task_started(self, task_id: int) -> None:
+    self._latest_task_id = task_id
+
   def _append_result_row(self, item: CollectResultItem) -> None:
     platform_id = self._resolve_platform_id(item)
-    if platform_id not in self.results_by_platform:
+    if platform_id not in self.result_grids:
       return
     if not item.platform_id:
       item.platform_id = platform_id
 
-    rows = self.results_by_platform[platform_id]
-    rows.append(item)
-    grid = self.result_grids.get(platform_id)
-    if grid is not None:
-      grid.add_row(item, len(rows))
     self._record_result_status(item.status)
-    self._refresh_progress_display()
+    self._schedule_progress_refresh()
+
+    task_id = self._get_latest_task_id()
+    if task_id is None:
+      return
+
+    state = self._get_page_state(platform_id)
+    is_active_tab = platform_id == self._get_current_tab_platform_id()
+
+    if is_active_tab and not state.pinned_page:
+      self._schedule_page_reload(platform_id, force_last_page=True)
+    elif is_active_tab:
+      self._update_pager_summary(platform_id)
+    else:
+      state.total_count = self.db.count_exportable_results(task_id, platform_id)
 
   def _on_collect_finished(self, summary: CollectSummary) -> None:
     self.is_collecting = False
     if summary.task_id is not None:
       self._latest_task_id = summary.task_id
     self._refresh_workflow_buttons()
+    active = self._get_current_tab_platform_id()
+    if active and self._get_latest_task_id() is not None:
+      self._load_platform_page(active, force_last_page=True)
 
     if summary.expired_account_ids:
       for account_id in summary.expired_account_ids:

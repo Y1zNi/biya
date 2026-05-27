@@ -142,6 +142,7 @@ class CollectResultGrid(ctk.CTkFrame):
     )
     self._tooltip: Optional[ctk.CTkToplevel] = None
     self._row_records: List[Tuple[CollectResultItem, int]] = []
+    self._footer_text: Optional[str] = None
     self._is_empty = True
 
     self.grid_rowconfigure(0, weight=1)
@@ -165,17 +166,6 @@ class CollectResultGrid(ctk.CTkFrame):
       corner_radius=0,
     )
     self.table_scroll.pack(fill='both', expand=True)
-
-    self.footer = ctk.CTkFrame(self.body_wrap, fg_color='transparent')
-    self.footer.pack(fill='x', pady=8)
-
-    self.total_label = ctk.CTkLabel(
-      self.footer,
-      text='共 0 条',
-      font=font_caption(),
-      text_color=COLOR_TEXT_DIM,
-    )
-    self.total_label.pack(side='right', padx=8)
 
     self.empty_label = ctk.CTkLabel(
       self.table_scroll,
@@ -313,23 +303,33 @@ class CollectResultGrid(ctk.CTkFrame):
     self.empty_label.pack(pady=60)
 
   def _update_footer(self) -> None:
-    count = len(self._row_records)
-    self.total_label.configure(text=f'共 {count} 条')
+    pass
 
-  def set_total_display(self, total_count: int, rendered_count: Optional[int] = None) -> None:
-    if rendered_count is not None and rendered_count < total_count:
-      self.total_label.configure(
-        text=f'共 {total_count} 条（界面显示最近 {rendered_count} 条，导出含全部）',
-      )
-    else:
-      self.total_label.configure(text=f'共 {total_count} 条')
+  def set_footer_text(self, text: str) -> None:
+    pass
 
   def clear(self) -> None:
     self._row_records.clear()
+    self._footer_text = None
     self._clear_table_scroll()
     self._is_empty = True
     self._show_empty_state()
     self._update_footer()
+
+  def load_page(self, items: List[CollectResultItem], *, global_offset: int = 0) -> None:
+    """加载当前页数据（先清空再渲染，最多一页行数）."""
+    self._row_records.clear()
+    self._clear_table_scroll()
+    if not items:
+      self._is_empty = True
+      self._show_empty_state()
+      return
+
+    self._is_empty = False
+    for index, item in enumerate(items):
+      row_index = global_offset + index + 1
+      self._row_records.append((item, row_index))
+      self._append_row_widget(item, row_index)
 
   def add_row(self, item: CollectResultItem, row_index: int) -> None:
     if self._is_empty:
@@ -422,6 +422,90 @@ class CollectResultGrid(ctk.CTkFrame):
       widget.bind('<Leave>', hide, add='+')
 
     widget.bind('<Enter>', show)
+
+
+class ResultPagerBar(ctk.CTkFrame):
+  """采集结果表分页条."""
+
+  def __init__(
+    self,
+    master,
+    *,
+    on_first: Callable[[], None],
+    on_prev: Callable[[], None],
+    on_next: Callable[[], None],
+    on_last: Callable[[], None],
+    on_jump: Callable[[], None],
+  ) -> None:
+    super().__init__(master, fg_color='transparent')
+
+    for label, cmd, width in (
+      ('首页', on_first, 44),
+      ('上一页', on_prev, 52),
+      ('下一页', on_next, 52),
+      ('末页', on_last, 44),
+    ):
+      ctk.CTkButton(
+        self,
+        text=label,
+        width=width,
+        height=28,
+        corner_radius=RADIUS_BTN,
+        fg_color=COLOR_BORDER,
+        hover_color=COLOR_BORDER_LIGHT,
+        text_color=COLOR_TEXT,
+        font=font_caption(),
+        command=cmd,
+      ).pack(side='left', padx=(0, 4))
+
+    ctk.CTkLabel(self, text='第', font=font_caption(), text_color=COLOR_TEXT_DIM).pack(
+      side='left', padx=(8, 2),
+    )
+    self.page_entry = ctk.CTkEntry(self, width=48, height=28, font=font_caption())
+    self.page_entry.pack(side='left')
+    self.page_suffix_label = ctk.CTkLabel(
+      self,
+      text='/ 1 页',
+      font=font_caption(),
+      text_color=COLOR_TEXT_DIM,
+    )
+    self.page_suffix_label.pack(side='left', padx=(4, 4))
+
+    ctk.CTkButton(
+      self,
+      text='跳转',
+      width=44,
+      height=28,
+      corner_radius=RADIUS_BTN,
+      fg_color=COLOR_BORDER,
+      hover_color=COLOR_BORDER_LIGHT,
+      text_color=COLOR_TEXT,
+      font=font_caption(),
+      command=on_jump,
+    ).pack(side='left', padx=(0, 8))
+
+    self.summary_label = ctk.CTkLabel(
+      self,
+      text='共 0 条',
+      font=font_caption(),
+      text_color=COLOR_TEXT_DIM,
+    )
+    self.summary_label.pack(side='right', padx=8)
+
+  def update_display(self, total: int, page: int, total_pages: int) -> None:
+    total_pages = max(1, total_pages)
+    self.summary_label.configure(text=f'共 {total} 条 · 第 {page} / {total_pages} 页')
+    self.page_suffix_label.configure(text=f'/ {total_pages} 页')
+
+  def set_page_entry(self, page: int) -> None:
+    self.page_entry.delete(0, 'end')
+    self.page_entry.insert(0, str(max(1, page)))
+
+  def get_page_entry_value(self) -> int:
+    try:
+      return max(1, int(self.page_entry.get().strip()))
+    except ValueError:
+      return 1
 
 
 def PrimaryButton(master, text: str, command: Optional[Callable] = None, width: int = 110, **kwargs) -> ctk.CTkButton:

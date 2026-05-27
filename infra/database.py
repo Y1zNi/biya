@@ -483,6 +483,29 @@ class Database:
         ).fetchone()
     return int(row[0]) if row else 0
 
+  def list_collect_results_page(
+    self,
+    task_id: int,
+    platform_id: str,
+    page: int,
+    page_size: int = 20,
+  ) -> List[sqlite3.Row]:
+    """按 id 升序分页读取可导出结果（含 payload_json）."""
+    page = max(1, page)
+    page_size = max(1, page_size)
+    offset = (page - 1) * page_size
+    with self._connect() as conn:
+      return conn.execute(
+        """
+        SELECT * FROM collect_results
+        WHERE task_id = ? AND platform_id = ?
+          AND payload_json IS NOT NULL AND TRIM(payload_json) != ''
+        ORDER BY id ASC
+        LIMIT ? OFFSET ?
+        """,
+        (task_id, platform_id, page_size, offset),
+      ).fetchall()
+
   def iter_collect_results(
     self,
     task_id: int,

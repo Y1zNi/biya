@@ -43,8 +43,8 @@ COLLECT_PAGE_TIMEOUT_MAX_SEC = 180
 COLLECT_HEADLESS = True
 EXPORT_DIR = APP_DATA_DIR / 'exports'
 
-# 启动恢复时表格最多渲染行数（导出仍含 DB 全部 JSON 行）
-UI_RESTORE_RENDER_LIMIT = 500
+# 采集结果表格每页渲染行数（展示分页；导出仍含 DB 全部 JSON 行）
+UI_PAGE_SIZE = 20
 # 「导出全部」超过该行数时弹确认
 EXPORT_WARN_ROW_COUNT = 3000
 # DB 流式读/写 Excel 分批大小

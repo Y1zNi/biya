@@ -34,6 +34,7 @@ from infra.platform_detect import detect_platform
 
 OnProgress = Callable[[CollectProgress], None]
 OnRow = Callable[[CollectResultItem], None]
+OnTaskStarted = Callable[[int], None]
 
 
 def build_unsupported_item(link: str) -> CollectResultItem:
@@ -105,6 +106,7 @@ class CollectService:
     *,
     on_progress: Optional[OnProgress] = None,
     on_row: Optional[OnRow] = None,
+    on_task_started: Optional[OnTaskStarted] = None,
   ) -> CollectSummary:
     self.reset_cancel()
 
@@ -138,6 +140,8 @@ class CollectService:
       total=len(links),
     )
     summary.task_id = task_id
+    if on_task_started is not None:
+      on_task_started(task_id)
 
     context_cache: Dict[str, Tuple[Browser, BrowserContext]] = {}
     set_batch_page_timeout_ms(params.page_timeout_ms)
