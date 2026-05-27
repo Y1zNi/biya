@@ -26,6 +26,8 @@ from config import (
   LOGIN_TIMEOUT_SECONDS,
   PLATFORM_LOGIN_URLS,
   QR_REFRESH_INTERVAL_SECONDS,
+  XIAOHONGSHU_LOGIN_HEADLESS,
+  XIAOHONGSHU_LOGIN_TIMEOUT_SECONDS,
 )
 from infra.collectors.douyin_parsers.page import dismiss_overlays
 from infra.collectors.bilibili_parsers.profile import fetch_bilibili_nickname
@@ -185,6 +187,17 @@ XIAOHONGSHU_LOGGED_IN_SELECTORS = [
 
 XIAOHONGSHU_LOGIN_COOKIE_NAMES = frozenset({'web_session'})
 
+XIAOHONGSHU_CAPTCHA_HINTS = (
+  '验证码',
+  '安全验证',
+  '滑动验证',
+  '请完成验证',
+  '人机验证',
+  '图形验证',
+  '拖动滑块',
+  '滑块验证',
+)
+
 # 登录后点击侧栏「我」进入个人主页（首页 __INITIAL_STATE__ 通常无 nickname）
 XIAOHONGSHU_PROFILE_LINK_SELECTORS = [
   'xpath=//*[@id="global"]/motion[2]/motion[1]/ul/div[1]/li[5]/motion/a',
@@ -342,6 +355,16 @@ class LoginHandler:
   def cancel(self) -> None:
     self._cancelled = True
 
+  def _login_headless(self) -> bool:
+    if self.platform_id == 'xiaohongshu':
+      return XIAOHONGSHU_LOGIN_HEADLESS
+    return LOGIN_HEADLESS
+
+  def _login_timeout_seconds(self) -> int:
+    if self.platform_id == 'xiaohongshu':
+      return XIAOHONGSHU_LOGIN_TIMEOUT_SECONDS
+    return LOGIN_TIMEOUT_SECONDS
+
   async def run_login(
     self,
     state_path: Path,
@@ -375,7 +398,7 @@ class LoginHandler:
         await self._open_kuaishou_scan_login(on_status)
         refresh_task = asyncio.create_task(self._qr_refresh_loop(on_status))
       elif self.platform_id == 'xiaohongshu':
-        on_status('正在加载小红书...')
+        on_status('正在加载小红书（将打开浏览器窗口，请勿关闭）...')
         await self._page.goto(XIAOHONGSHU_HOME_URL, wait_until='domcontentloaded', timeout=60000)
         await asyncio.sleep(2)
         await self._open_xiaohongshu_scan_login(on_status)
@@ -407,7 +430,7 @@ class LoginHandler:
       else:
         await self._generic_login_flow(on_status)
 
-      logged_in = await self._wait_for_login(self._page, LOGIN_TIMEOUT_SECONDS)
+      logged_in = await self._wait_for_login(self._page, self._login_timeout_seconds())
 
       if refresh_task:
         refresh_task.cancel()
@@ -541,7 +564,10 @@ class LoginHandler:
         await self._capture_baseline_login_cookies()
         if self._on_qr_image:
           self._on_qr_image(image_bytes)
-        on_status('请使用小红书 APP 扫描二维码')
+        on_status(
+          '请用小红书 App 扫码（对话框或弹出的浏览器窗口均可）；'
+          '若窗口出现验证码请先在浏览器内完成'
+        )
         return
 
       if i < 4:
@@ -780,9 +806,15 @@ class LoginHandler:
     while not self._cancelled and not self._flow_state.logged_in:
       if self._flow_state.qr_captured and self._page:
         if self.platform_id == 'xiaohongshu':
+          if await self._is_xiaohongshu_captcha_visible():
+            on_status('请在弹出的浏览器窗口完成安全验证（验证码/滑块等）')
+            await asyncio.sleep(QR_REFRESH_INTERVAL_SECONDS)
+            continue
           if await self._is_xiaohongshu_scan_pending_confirm():
             self._flow_state.qr_pending_confirm = True
-            on_status('扫码成功，请在手机上确认登录')
+            on_status(
+              '扫码成功：请在手机确认；若浏览器出现验证码请先在窗口内完成'
+            )
             await asyncio.sleep(QR_REFRESH_INTERVAL_SECONDS)
             continue
 
@@ -808,6 +840,47 @@ class LoginHandler:
     except Exception:
       pass
     return False
+
+  async def _is_xiaohongshu_captcha_visible(self) -> bool:
+    """页面是否出现网页侧安全验证（验证码/滑块等）."""
+    if not self._page:
+      return False
+    try:
+      text = await self._page.locator('body').inner_text()
+      normalized = re.sub(r'\s+', '', text or '')
+      return any(hint in normalized for hint in XIAOHONGSHU_CAPTCHA_HINTS)
+    except Exception:
+      return False
+
+  async def _xiaohongshu_login_detected(self, page: Page) -> bool:
+    """小红书登录：Cookie 变化，或已有 web_session 且页面呈已登录态."""
+    if await self._has_real_login_cookies(page):
+      return True
+    if not self._flow_state.qr_captured:
+      return False
+
+    cookies = await page.context.cookies()
+    session_value = ''
+    for cookie in cookies:
+      if cookie.get('name') == 'web_session':
+        session_value = str(cookie.get('value', '')).strip()
+        break
+    if not session_value:
+      return False
+    if not await self._is_xiaohongshu_logged_in_ui(page):
+      return False
+    if not await self._is_login_modal_closed(page):
+      return False
+
+    baseline = self._flow_state.baseline_cookie_values or {}
+    old_value = baseline.get('web_session', '')
+    if not old_value or session_value != old_value:
+      return True
+    # 验证码/风控场景：web_session 未轮换但页面已登录
+    return bool(
+      self._flow_state.qr_pending_confirm
+      or await self._is_xiaohongshu_captcha_visible(),
+    )
 
   async def _is_valid_qr_screenshot_target(self, loc: Locator) -> bool:
     if self.platform_id == 'vivo':
@@ -1008,7 +1081,7 @@ class LoginHandler:
   async def _start_browser(self) -> None:
     self._playwright = await async_playwright().start()
     self._browser = await self._playwright.chromium.launch(
-      headless=LOGIN_HEADLESS,
+      headless=self._login_headless(),
       args=['--disable-blink-features=AutomationControlled'],
     )
     self._context = await self._browser.new_context(
@@ -1050,27 +1123,28 @@ class LoginHandler:
         continue
 
       if self.platform_id == 'xiaohongshu':
-        if await self._is_xiaohongshu_scan_pending_confirm():
+        if await self._is_xiaohongshu_captcha_visible():
+          if self._on_status:
+            self._on_status('请在弹出的浏览器窗口完成安全验证（验证码/滑块等）')
+        elif await self._is_xiaohongshu_scan_pending_confirm():
           self._flow_state.qr_pending_confirm = True
+          if self._on_status:
+            self._on_status(
+              '扫码成功：请在手机确认；若浏览器出现验证码请先在窗口内完成',
+            )
 
-      if await self._has_real_login_cookies(page):
+      if self.platform_id == 'xiaohongshu':
+        if await self._xiaohongshu_login_detected(page):
+          self._flow_state.logged_in = True
+          await self._after_login_page_ready(page)
+          return True
+      elif await self._has_real_login_cookies(page):
         self._flow_state.logged_in = True
         await self._after_login_page_ready(page)
         return True
 
       if self.platform_id == 'kuaishou':
         if not await self._is_kuaishou_login_prompt_visible(page):
-          if await self._has_real_login_cookies(page):
-            self._flow_state.logged_in = True
-            await self._after_login_page_ready(page)
-            return True
-      elif self.platform_id == 'xiaohongshu':
-        if await self._is_xiaohongshu_logged_in_ui(page):
-          if await self._has_real_login_cookies(page):
-            self._flow_state.logged_in = True
-            await self._after_login_page_ready(page)
-            return True
-        if await self._is_login_modal_closed(page):
           if await self._has_real_login_cookies(page):
             self._flow_state.logged_in = True
             await self._after_login_page_ready(page)
