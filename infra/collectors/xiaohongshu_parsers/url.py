@@ -15,6 +15,10 @@ _NOTE_ID_PATTERNS = (
   re.compile(r'/note/([0-9a-f]+)', re.I),
 )
 
+_NOTE_ID_RE = re.compile(r'^[0-9a-f]{24}$', re.I)
+
+_QUERY_NOTE_ID_KEYS = ('target_note_id', 'note_id', 'noteId')
+
 
 @dataclass
 class NoteUrlInfo:
@@ -43,6 +47,20 @@ def extract_url_params(url: str) -> dict[str, str]:
   return dict(parse_qsl(parsed.query))
 
 
+def _normalize_note_id(value: str) -> str:
+  v = (value or '').strip()
+  return v if _NOTE_ID_RE.fullmatch(v) else ''
+
+
+def _note_id_from_query_params(url: str) -> str:
+  params = extract_url_params(url)
+  for key in _QUERY_NOTE_ID_KEYS:
+    note_id = _normalize_note_id(params.get(key, ''))
+    if note_id:
+      return note_id
+  return ''
+
+
 def extract_note_id_from_url(url: str) -> str:
   text = (url or '').strip()
   for pattern in _NOTE_ID_PATTERNS:
@@ -50,9 +68,10 @@ def extract_note_id_from_url(url: str) -> str:
     if match:
       return match.group(1)
   tail = text.split('/')[-1].split('?')[0].strip()
-  if re.fullmatch(r'[0-9a-f]{24}', tail, re.I):
-    return tail
-  return ''
+  note_id = _normalize_note_id(tail)
+  if note_id:
+    return note_id
+  return _note_id_from_query_params(text)
 
 
 def parse_note_url(url: str) -> NoteUrlInfo:

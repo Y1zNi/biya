@@ -2,11 +2,12 @@
 """PyInstaller single-file exe build spec."""
 
 import os
+import sys
 from pathlib import Path
 
 EXE_NAME = os.environ.get('PYINSTALLER_EXE_NAME', 'SocialMediaTool')
 
-from PyInstaller.utils.hooks import collect_all, collect_submodules
+from PyInstaller.utils.hooks import collect_all, collect_dynamic_libs, collect_submodules
 
 block_cipher = None
 project_root = Path(SPECPATH)
@@ -22,6 +23,13 @@ hiddenimports = [
 ]
 datas = []
 binaries = []
+
+binaries += collect_dynamic_libs('sqlite3')
+_python_dlls = Path(sys.base_prefix) / 'DLLs'
+for _dll_name in ('sqlite3.dll', '_sqlite3.pyd'):
+  _dll_path = _python_dlls / _dll_name
+  if _dll_path.is_file():
+    binaries.append((str(_dll_path), '.'))
 
 if bundle_browsers.is_dir():
   datas.append((str(bundle_browsers), 'ms-playwright'))

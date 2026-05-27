@@ -3,6 +3,8 @@
 
 from __future__ import annotations
 
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
@@ -63,12 +65,52 @@ def ensure_dependencies() -> None:
   run([sys.executable, '-m', 'playwright', 'install', 'chromium'])
 
 
+def _embedded_playwright_dir_names() -> list[str]:
+  """仅打包当前 Playwright 版本所需的 Chromium/ffmpeg（与原先 ~200MB 包一致）."""
+  spec = importlib.util.find_spec('playwright')
+  if spec is None or not spec.origin:
+    raise RuntimeError('playwright package not found')
+  browsers_json = Path(spec.origin).parent / 'driver' / 'package' / 'browsers.json'
+  data = json.loads(browsers_json.read_text(encoding='utf-8'))
+  names: list[str] = []
+  for entry in data.get('browsers', []):
+    name = entry.get('name', '')
+    revision = str(entry.get('revision', '')).strip()
+    if name == 'chromium' and revision:
+      names.append(f'chromium-{revision}')
+    elif name == 'ffmpeg' and revision:
+      names.append(f'ffmpeg-{revision}')
+  if not any(n.startswith('chromium-') for n in names):
+    raise RuntimeError('Could not resolve chromium revision from playwright browsers.json')
+  return names
+
+
 def stage_playwright_browsers() -> None:
   src = get_ms_playwright_dir()
   if BUNDLE_DIR.exists():
     shutil.rmtree(BUNDLE_DIR)
-  print(f'Staging embedded browsers: {src} -> {BUNDLE_DIR}')
-  shutil.copytree(src, BUNDLE_DIR)
+  BUNDLE_DIR.mkdir(parents=True)
+
+  dir_names = _embedded_playwright_dir_names()
+  winldd = src / 'winldd-1007'
+  if winldd.is_dir():
+    dir_names.append('winldd-1007')
+
+  print(f'Staging embedded browsers (chromium only): {src} -> {BUNDLE_DIR}')
+  for dir_name in dir_names:
+    src_dir = src / dir_name
+    if not src_dir.is_dir():
+      raise FileNotFoundError(
+        f'Missing browser bundle: {src_dir}\n'
+        'Run: python -m playwright install chromium'
+      )
+    print(f'  + {dir_name}')
+    shutil.copytree(src_dir, BUNDLE_DIR / dir_name)
+
+  staged_mb = sum(
+    f.stat().st_size for f in BUNDLE_DIR.rglob('*') if f.is_file()
+  ) / (1024 * 1024)
+  print(f'Staged {len(dir_names)} dirs, ~{staged_mb:.1f} MB')
 
 
 def stage_node_runtime() -> None:
@@ -150,9 +192,12 @@ def clean_release_dir() -> None:
     if path.name == '.gitkeep':
       continue
     if path.is_file():
-      path.unlink()
+      path.unlink(missing_ok=True)
     elif path.is_dir():
-      shutil.rmtree(path)
+      try:
+        shutil.rmtree(path)
+      except PermissionError:
+        print(f'Warning: skip locked directory {path}')
 
 
 def create_zip() -> Path:
